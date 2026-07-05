@@ -1,7 +1,7 @@
 ---
 title: "Managing Admission Processes, Programs, and Modalities"
 sidebarTitle: "Processes"
-description: "Create and configure admission processes with programs, modalities, tariffs, document requirements, and exam schedules. Multiple processes can run concurrently."
+description: "Create and manage admission processes with programs, modalities, and exam schedules. Run multiple concurrent processes with full data isolation."
 ---
 
 An admission process (`Proceso`) is the top-level configuration unit in the Sistema de Admisión Web. Every pre-inscription, inscription, vacancy allocation, and result belongs to exactly one process. Processes are versioned by year, cycle, and convocatory number, which means you can run multiple processes concurrently — for example, a first-semester undergraduate process alongside a second-admission process — without any data overlap.
@@ -31,8 +31,6 @@ The `Proceso` Eloquent model (`app/Models/Proceso.php`) is stored in the `proces
 | `url` | string | Optional external URL (e.g. convocatory PDF) |
 | `observaciones` | text | Free-text admin notes |
 
-A process also carries `procesoRequisitos` (active document requirements) via the `hasMany` relationship to `ProcesoRequisito`.
-
 ## Creating a New Process
 
 <Steps>
@@ -40,7 +38,7 @@ A process also carries `procesoRequisitos` (active document requirements) via th
     Navigate to `/admin/procesos`. The Vue page (`resources/js/Pages/Procesos/procesos.vue`) loads the paginated list of processes.
   </Step>
   <Step title="Fill in the Required Fields">
-    At minimum you must supply: `nombre`, `slug`, `anio`, `ciclo`, `nivel`, `id_tipo_proceso`, `id_modalidad_proceso`, `id_sede_filial`, and `estado`. Exam dates and the registration window are strongly recommended before activating the process.
+    At minimum you must supply: `nombre`, `slug`, `anio`, `ciclo`, `nivel`, `tipo` (id_tipo_proceso), `modalidad` (id_modalidad_proceso), `sede` (id_sede_filial), and `estado`. Exam dates and the registration window are strongly recommended before activating the process.
   </Step>
   <Step title="Save">
     Submit the form. The front end calls `POST /admin/save-proceso`. The controller creates a new `Proceso` record and returns the persisted model in the response.
@@ -52,25 +50,27 @@ A process also carries `procesoRequisitos` (active document requirements) via th
 
 ```bash
 # Create a new process
-curl -X POST https://your-domain.com/admin/save-proceso \
-  -H "Authorization: Bearer {token}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "nombre": "ADMISIÓN 2025-I",
-    "slug": "admision-2025-i",
-    "anio": 2025,
-    "ciclo": 1,
-    "nivel": 1,
-    "tipo": 1,
-    "modalidad": 2,
-    "sede": 1,
-    "estado": 1,
-    "fec_examen": "2025-03-15",
-    "f_inicio": "2025-01-20",
-    "f_fin": "2025-03-10",
-    "convocatoria": 1,
-    "cod_proceso": "2025-I"
-  }'
+POST /admin/save-proceso
+Content-Type: application/json
+
+{
+  "nombre": "ADMISIÓN 2025-I",
+  "slug": "admision-2025-i",
+  "anio": 2025,
+  "ciclo": 1,
+  "nivel": 1,
+  "tipo": 1,
+  "modalidad": 2,
+  "sede": 1,
+  "estado": 1,
+  "fec_examen": "2025-03-15",
+  "f_inicio": "2025-01-20",
+  "f_fin": "2025-03-10",
+  "convocatoria": 1,
+  "cod_proceso": "2025-I",
+  "observacion": "",
+  "id_reglamento": null
+}
 ```
 
 **Success response:**
@@ -80,27 +80,59 @@ curl -X POST https://your-domain.com/admin/save-proceso \
   "titulo": "REGISTRO NUEVO",
   "mensaje": "Proceso ADMISIÓN 2025-I creado con éxito",
   "estado": true,
-  "datos": { "id": 14, "nombre": "ADMISIÓN 2025-I", "slug": "admision-2025-i", ... }
+  "datos": { "id": 14, "nombre": "ADMISIÓN 2025-I", "slug": "admision-2025-i" }
 }
 ```
 
 ## Listing and Filtering Processes
 
-The process list supports full-text search across `nombre`, `filial.nombre`, `modalidad_proceso.nombre`, and `anio`. Results are paginated at 50 per page and ordered by `id DESC`.
+The process list supports full-text search across `nombre`, `filial.nombre`, `modalidad_proceso.nombre`, and `anio`. Results are paginated at 50 per page and ordered by `id DESC`. An optional `nivel` filter restricts results to undergraduate (`1`) or segunda admisión (`2`) processes.
 
 ```bash
 # List processes (POST, supports term/nivel filters)
-curl -X POST https://your-domain.com/admin/procesos/get-procesos \
-  -H "Authorization: Bearer {token}" \
-  -H "Content-Type: application/json" \
-  -d '{ "term": "2025", "nivel": 1 }'
+POST /admin/procesos/get-procesos
+Content-Type: application/json
+
+{ "term": "2025", "nivel": 1 }
 ```
 
-To populate a lightweight select dropdown — for example, when switching the active process — use the dedicated select endpoint that returns only active processes:
+The response wraps a Laravel paginator under `datos`:
+
+```json
+{
+  "estado": true,
+  "datos": {
+    "data": [
+      {
+        "id": 14,
+        "nombre": "ADMISIÓN 2025-I",
+        "slug": "admision-2025-i",
+        "anio": 2025,
+        "ciclo": 1,
+        "estado": 1,
+        "nivel": 1,
+        "id_sede": 1,
+        "sede": "SEDE CENTRAL",
+        "id_tipo": 2,
+        "tipo": "ORDINARIO",
+        "id_modalidad": 1,
+        "modalidad": "PRESENCIAL",
+        "fec_inicio": "2025-01-20",
+        "fec_fin": "2025-03-10",
+        "fec_examen": "2025-03-15",
+        "convocatoria": 1
+      }
+    ],
+    "total": 1,
+    "per_page": 50
+  }
+}
+```
+
+To populate a lightweight select dropdown — for example, when switching the active process — use the dedicated endpoint that returns only active processes (`estado = 1`):
 
 ```bash
-curl https://your-domain.com/admin/get-select-procesos \
-  -H "Authorization: Bearer {token}"
+GET /admin/get-select-procesos
 ```
 
 Response:
@@ -114,6 +146,10 @@ Response:
   ]
 }
 ```
+
+<Note>
+  There is a separate API endpoint `GET /api/get-select-procesos` (Sanctum-authenticated) that maps to `ProcesoController::getSelectProcesoHuellas()` and is used by the biometric device integration. It returns additional fields (`anio`, `ciclo`) and is not for use within the admin web UI.
+</Note>
 
 ## Editing and Deleting a Process
 
@@ -137,52 +173,42 @@ Programs are linked to a process via the `vacantes` pivot, which records which a
 GET /admin/get-programas-proceso
 ```
 
-This returns a cross-tab where each row is a program (`nombre_corto`) and columns represent modality IDs (1–9), showing `"SI"` where the program has vacancies configured or `"-"` where it does not. Modality IDs map to the `modalidad` table (e.g. Ordinario, Especial, Traslado, etc.).
-
-To add a program-modality combination to the current process:
-
-```bash
-POST /admin/save-proceso
-Content-Type: application/json
-
-{
-  "id_modalidad": 1,
-  "id_programa": 42,
-  "estado": 1
-}
-```
+This returns a cross-tab where each row is a program and columns represent modality IDs, showing `"SI"` where the program has vacancies configured or `"-"` where it does not.
 
 ## Configuring Modalities per Process
 
-Modalities define the admission tracks an applicant can choose (ordinary exam, transfer, special quota, etc.). The available modalities for a process are determined by which `vacantes` rows exist. To get the modalities that have at least one vacancy configured for the active process:
+Modalities define the admission tracks an applicant can choose (ordinary exam, transfer, special quota, etc.). The available modalities for a process are determined by which `vacantes` rows exist. To get the modalities that have at least one vacancy configured for a given process, use the global helper route (outside the `/admin` prefix):
 
 ```bash
-GET /admin/get-select-modalidades-proceso/{id_proceso}
+GET /get-select-modalidad-proceso/{id}
 ```
 
-Process-level modality type (`id_modalidad_proceso`) is set on the `Proceso` record itself and represents the overall modality classification (e.g. presencial, semipresencial).
+Process-level modality type (`id_modalidad_proceso`) is set on the `Proceso` record itself and represents the overall modality classification. To retrieve all available modality types:
+
+```bash
+GET /admin/procesos/get-modalidades
+```
+
+To retrieve all process types (`tipo_proceso`):
+
+```bash
+GET /admin/procesos/get-tipos
+```
 
 ## Setting Tariffs
 
-Tariff (`Tarifa`) records store the registration fee per modality. They are configured separately and referenced during the payment verification step in the inscription flow.
+Tariff (`Tarifa`) records store the registration fee per modality. They are configured separately at `/admin/tarifas` and referenced during the payment verification step in the inscription flow.
 
 ## Defining Document Requirements
 
-Document requirements are defined per process using `ProcesoRequisito` records. The `Proceso` model exposes two relationships:
-
-```php
-$proceso->procesoRequisitos();  // all requirements
-$proceso->requisitosActivos();  // only where activo = true
-```
-
-To retrieve or save requirements for a process:
+Document requirements are defined per process using `ProcesoRequisito` records. To retrieve or save requirements for a process:
 
 ```bash
-# Fetch requirements
+# Fetch requirements linked to a process
 POST /admin/requisitos/get-by-proceso
 { "id_proceso": 14 }
 
-# Save requirement configuration
+# Save requirement configuration for a process
 POST /admin/requisitos/save-proceso-requisitos
 { "id_proceso": 14, "requisitos": [...] }
 ```
@@ -194,27 +220,44 @@ Active processes are exposed publicly via their `slug`. The `ProcesoController::
 - `nivel = 1` → `Publico/preinscripcion-pregrado`
 - `nivel = 2` → `Segundas/Publico/preinscripcion`
 
-Results are also public:
+The public route pattern is:
+
+```
+GET /{slug}/preinscripcion
+```
+
+Results are also published publicly:
 
 ```
 GET /{slug}/resultados
 ```
 
-This renders `Publico/Resultados/index` and passes an `admin` flag (`1` or `0`) to control whether admin-only controls (like result overrides) are visible.
+This renders `Publico/Resultados/index` and passes an `admin` flag (`1` or `0`) to control whether admin-only controls are visible.
 
 ## Process Configuration Summary
 
 ```bash
-# Get process types
+# Get process types for select dropdown
 GET /admin/procesos/get-tipos
 
-# Get process-level modalities
+# Get process-level modalities for select dropdown
 GET /admin/procesos/get-modalidades
 
-# Get programs filtered by modality and area
-POST /admin/get-select-programas-proceso-area
+# Get modalities with vacancies for a specific process (global route)
+GET /get-select-modalidad-proceso/{id}
+
+# Get programs with active vacancies for a modality + process (global route)
+POST /get-select-programas-proceso
+{ "id_modalidad": 1, "id_proceso": 14 }
+
+# Get programs filtered by modality, process, and academic area (global route)
+POST /get-select-programas-proceso-area
 { "id_modalidad": 1, "id_proceso": 14, "area": "INGENIERÍAS" }
 
 # Get programs for the active process (admin dropdown)
 GET /admin/get-select-programas-proceso-admin
+
+# Switch the authenticated admin's active process
+POST /admin/cambiar_proceso
+{ "id_proceso": 14 }
 ```

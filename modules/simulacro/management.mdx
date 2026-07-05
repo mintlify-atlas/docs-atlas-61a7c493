@@ -1,7 +1,7 @@
 ---
-title: "Simulacro: Mock Exam Management and Participant Registration"
+title: "Simulacro: Mock Exam Management and Participants"
 sidebarTitle: "Management"
-description: "Run practice exam sessions — register participants, upload answer sheets, verify photos, and publish simulacro results for score lookup via the public API."
+description: "Run practice exam sessions — register participants, upload answer sheets, verify photos, and publish simulacro results for public API score lookup."
 ---
 
 The Simulacro module provides a complete workflow for running mock university admission exams before the official admission cycle. Coordinators create simulacro sessions, participants register and pay the enrollment fee, answer sheets are uploaded and scored, and final results are published to a public API endpoint so participants can look up their scores by DNI. This module operates entirely independently from the main admission exam pipeline.
@@ -26,6 +26,7 @@ Auth redirect:   /simulacro  (after login with id_rol = 6)
 | `GET /simulacro/simulacros` | `Simulacro/Simulacros` | Simulacro session list |
 | `GET /simulacro/inscripciones` | `Simulacro/Admin/Inscripciones/index` | Enrolled participant list |
 | `GET /simulacro/participantes` | `Simulacro/Admin/Participantes/index` | Participant registry |
+| `GET /simulacro/entrada` | `Simulacro/Entrada/index` | Exam entry / check-in |
 | `GET /simulacro/pagos` | `Simulacro/Admin/Pagos/index` | Payment management |
 | `GET /simulacro/pagos-consulta` | `Simulacro/Admin/Pagos/consulta` | Payment query/lookup |
 | `GET /verificacion-fotos` | `VerfificacionD/index` | Photo verification |
@@ -85,39 +86,20 @@ Auth redirect:   /simulacro  (after login with id_rol = 6)
     - `POST /simulacro/get-inscritos-simulacro` — paginated list joined with `programa`, `colegios`, and ubigeo, searchable by name, DNI, school, or program.
     - `POST /simulacro/get-participantes-simulacro` — full participant detail including residence and school ubigeo.
 
-    A PDF enrollment voucher is generated on demand via `SimulacroController@pdfInscripcion` and stored at `public/documentos/simulacro2023/{dni}.pdf`.
+    A PDF enrollment voucher is generated on demand via `SimulacroController@pdfInscripcion` (`GET /pdf-simulacro-inscripcion/{dni}`) and stored at `public/documentos/simulacro2023/{dni}.pdf`.
   </Step>
 
-  <Step title="Answer sheets uploaded (ArchivoSimulacro)">
-    Answer sheets and exam response data are managed through `ArchivoSimulacroController` (stub, extended per session) and the `ResultadosController` bulk-upload endpoints:
+  <Step title="Answer sheets uploaded and scored">
+    Exam answer data and results are managed through the `ResultadosController` bulk-upload endpoints under the `/calificacion` prefix:
 
     | Endpoint | Controller Method | Description |
     |---|---|---|
-    | `POST /simulacros/subir-excel-simulacro` | `ResultadosController@SubirResultado` | Upload XLSX result file |
-    | `POST /simulacros/carga-ide/{proceso}/{area}` | `ResultadosController@cargaArchivoIde` | Load IDE answer data |
-    | `POST /simulacros/carga-res/{proceso}` | `ResultadosController@cargaArchivoRes` | Load response data |
-    | `POST /simulacros/carga-pat/{proceso}` | `ResultadosController@cargaArchivoPat` | Load pattern file |
+    | `POST /calificacion/subir-excel-simulacro` | `ResultadosController@SubirResultado` | Upload XLSX result file |
+    | `POST /calificacion/carga-ide/{proceso}/{area}` | `ResultadosController@cargaArchivoIde` | Load IDE answer data |
+    | `POST /calificacion/carga-res/{proceso}` | `ResultadosController@cargaArchivoRes` | Load response data |
+    | `POST /calificacion/carga-pat/{proceso}` | `ResultadosController@cargaArchivoPat` | Load pattern/key file |
 
-    The `SubirResultado.vue` component handles file selection, parses XLSX sheets client-side with `xlsx`, previews data in a table, and posts to the server with progress tracking:
-
-    ```vue
-    <script setup>
-    import * as XLSX from 'xlsx'
-    import axios from 'axios'
-
-    const subirResultados = async () => {
-      const response = await axios.post('subir-excel-simulacro', { data: excelData.value }, {
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.lengthComputable) {
-            progress.value = Math.round((progressEvent.loaded / progressEvent.total) * 100)
-          }
-        },
-      })
-    }
-    </script>
-    ```
-
-    Individual exam responses are also recorded per-question via `SimulacroController@saveRespuestas` and `guardarRespuesta`, storing each answer with its `nota` (0, partial, or full score × `ponderacion`) into `detalle_examen_simulacro`.
+    Individual exam responses are recorded per-question via `SimulacroController@saveRespuestas` (`POST /simulacro/save-respuestas`) and the private `guardarRespuesta` helper, storing each answer with its `nota` (0, partial, or full score × `ponderacion`) into `detalle_examen_simulacro`.
   </Step>
 
   <Step title="Photo verification">
@@ -133,7 +115,7 @@ Auth redirect:   /simulacro  (after login with id_rol = 6)
   </Step>
 
   <Step title="Results computed and published">
-    Aggregate scores per area are available through `ResultadosController@getResultados` (`POST /simulacros/get-puntaje-simulacro`). Maximum scores per knowledge area (INGENIERÍAS, BIOMÉDICAS, SOCIALES) are retrieved by `PuntajeController@getPunajesMaximos`:
+    Aggregate scores per area are available through `ResultadosController@getResultados` (`POST /get-puntaje-simulacro`). Maximum scores per knowledge area (INGENIERÍAS, BIOMÉDICAS, SOCIALES) are retrieved by `PuntajeController@getPunajesMaximos`:
 
     ```php
     // PuntajeController.php
@@ -159,21 +141,33 @@ Auth redirect:   /simulacro  (after login with id_rol = 6)
 
 ---
 
+## Exam Entry / Check-In
+
+The entry sub-panel at `GET /simulacro/entrada` (`Simulacro/Entrada/index`) lets staff record participant check-in on exam day. Three `SimulacroController` methods power this flow:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `POST /simulacro/get-participante` | `getEntrada` | Lookup a participant record by `nro_doc` from the `entrada` table |
+| `POST /simulacro/save-entrada` | `saveEntrada` | Mark a participant as checked in (`ingreso = 1`, `fecha_ingreso = now()`) |
+| `POST /simulacro/get-total-entrada` | `getTotalEntrada` | Return total check-in count broken down by area (INGENIERÍAS, BIOMÉDICAS, SOCIALES) |
+| `POST /simulacro/get-simulacro-ingreso` | `getIngresos` | Paginated list of all check-in records, searchable by name or DNI |
+
+---
+
 ## Payment Processing
 
-Participants pay a fee of S/. 10.00 before completing registration. Payment is handled by `PagoSimulacroController`, which integrates with the university's external payment gateway at `https://service2.unap.edu.pe/PAYMENTS_MNG/v1/`.
+Participants pay a fee before completing registration. Payment is handled by `PagoSimulacroController`, which integrates with the university's external payment gateway.
 
 **Payment verification flow:**
 
 ```php
-// PagoSimulacroController@pagoSimulacro
+// PagoSimulacroController@pagoSimulacro (GET /get-pago-simulacro/{dni})
 $pago = Pago::where('dni', $dni)
-    ->where('total', 10)   // exactly S/. 10.00
     ->where('status', 1)   // confirmed payment
     ->first();
 ```
 
-The coordinator dashboard shows all payments via `POST /simulacro/get-pagos-simulacro` (`PagoSimulacroController@getPagosSimulacro`), returning columns including `fullname`, `dni`, `description`, `confirmedDate`, `authorizationCode`, `total`, computed `comision`, `type`, and a derived `estado` (1 if linked to an enrollment, 0 if pending). An alternate consulta view queries the `pagostemp` table for cross-referencing through `POST /simulacro/get-pagos-simulacro-consulta`.
+The coordinator dashboard shows all payments via `POST /simulacro/get-pagos-simulacro` (`PagoSimulacroController@getPagosSimulacro`). An alternate consulta view queries the `pagostemp` table for cross-referencing through `POST /simulacro/get-pagos-simulacro-consulta`.
 
 ---
 
@@ -191,28 +185,15 @@ This endpoint is public (no `auth:sanctum` middleware) and returns the student's
 
 ---
 
-## Vocational Exam Detail
-
-The `DetalleExamenVocacionalController` records vocational orientation exam answers alongside the main simulacro. It exposes two write endpoints:
-
-```
-POST /save-respuesta  → DetalleExamenVocacionalController@saveRespuesta
-POST /save-vocacional → DetalleExamenVocacionalController@saveVocacional
-```
-
-Both store a `DetalleExamenVocacional` record linking the applicant's response to the vocational exam item.
-
----
-
 ## Dashboard Statistics
 
-The Simulacro admin panel surfaces real-time counters via three endpoints on `SimulacroController`:
+The Simulacro admin panel surfaces real-time counters via three `GET` endpoints on `SimulacroController` (all under the `auth` + `simulacro` middleware group):
 
 | Endpoint | Method | Returns |
 |---|---|---|
-| (internal) | `postulantesRegistrados` | Total `ParticipanteSimulacro` count + last registration date |
-| (internal) | `postulantesInscritos` | Total `InscripcionSimulacro` count + last enrollment date |
-| (internal) | `pagosRegistrados` | Total `Pago` count + last payment date |
-| (internal) | `postulantexPrograma` | Enrollment count grouped by `programa.nombre` and `area` |
-| (internal) | `reporteInscritosGenero` | Enrollment count grouped by `sexo` |
-| (internal) | `reporteInscritosAreas` | Enrollment count grouped by academic area |
+| `GET /simulacro/get-nro-participantes` | `postulantesRegistrados` | Total `ParticipanteSimulacro` count + last registration date |
+| `GET /simulacro/get-nro-inscritos` | `postulantesInscritos` | Total `InscripcionSimulacro` count + last enrollment date |
+| `GET /simulacro/get-nro-pagos` | `pagosRegistrados` | Total `Pago` count + last payment date |
+| `GET /simulacro/postulantes-por-programas` | `postulantexPrograma` | Enrollment count grouped by `programa.nombre` and `area` |
+| `GET /simulacro/get-inscritos-genero-reporte` | `reporteInscritosGenero` | Enrollment count grouped by `sexo` |
+| `GET /simulacro/get-inscritos-areas-reporte` | `reporteInscritosAreas` | Enrollment count grouped by academic area |

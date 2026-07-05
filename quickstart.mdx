@@ -1,7 +1,7 @@
 ---
-title: "Get Started with Sistema de Admisión Web"
+title: "Quickstart: Run Sistema de Admisión Web in Minutes"
 sidebarTitle: "Quickstart"
-description: "Clone, configure, and run the Sistema de Admisión Web locally in five steps using Laravel Sail or a standard LAMP stack."
+description: "Clone, configure, and run Sistema de Admisión Web locally — PHP 8.2+, Composer, MySQL, and Node.js 18+ required to get started."
 ---
 
 This guide walks you through getting a fully functional local instance of Sistema de Admisión Web running on your machine. The process covers cloning the source code, installing all PHP and JavaScript dependencies, wiring up the environment file, running the database migrations and seeders, and starting the development servers. The whole setup typically takes under ten minutes on a machine that already has the required runtimes installed.
@@ -116,7 +116,7 @@ npm run build
 
 ## What Happens After Login
 
-After successfully logging in, the `RedireccionarARol` middleware inspects the authenticated user's `id_rol` and redirects them to their dedicated portal:
+After successfully logging in, `AuthenticatedSessionController@store` inspects the authenticated user's `id_rol` and redirects them to their dedicated portal:
 
 | Role | Landing URL |
 |---|---|

@@ -79,6 +79,60 @@ curl https://your-domain.com/api/get-ingresante/12345678/2024/1 \
 
 ---
 
+## GET /api/get-ingresante-pago/{dni}/{anio}/{ciclo}
+
+Returns a lightweight admitted student record used for payment-related lookups. This endpoint is public and requires no authentication. Unlike `GET /api/get-ingresante`, it does not filter by year and cycle at query time (the parameters are accepted but currently unused in the query); it returns the first matching record for the given DNI.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+<ParamField path="anio" type="integer" required>
+  The admission year (e.g., `2024`). Accepted as a path segment; reserved for future filtering.
+</ParamField>
+
+<ParamField path="ciclo" type="integer" required>
+  The admission cycle number. Accepted as a path segment; reserved for future filtering.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-ingresante-pago/12345678/2024/1
+```
+
+### Response — HTTP 200 (found)
+
+```json
+{
+  "status": true,
+  "mensaje": "Ingresante encontrado",
+  "data": {
+    "nombres": "JUAN",
+    "primer_apellido": "QUISPE",
+    "segundo_apellido": "MAMANI",
+    "nro_documento": "12345678",
+    "codigo_ingreso": "240110001",
+    "id_programa": 5
+  }
+}
+```
+
+### Response — HTTP 203 (not found)
+
+```json
+{
+  "status": false,
+  "mensaje": "Ingresante no encontrado"
+}
+```
+
+---
+
 ## GET /api/get-postulante-pago/{dni}/{proceso}
 
 Returns a base applicant record for payment verification purposes, keyed by DNI and process ID.
@@ -168,7 +222,7 @@ curl https://your-domain.com/api/v1/get-postulante-inscrito/12345678 \
 
 ## GET /api/get-puntaje/{dni}
 
-Returns the applicant's score record for the current admission year. Results include the program name, admission modality, total score, vocational score, and apto/no-apto condition.
+Returns the applicant's score records for the current admission year. Results include the programme name, admission modality, total score, vocational score, and apto/no-apto condition.
 
 **Authentication:** None.
 
@@ -217,7 +271,7 @@ curl https://your-domain.com/api/get-puntaje/12345678
     Admission condition — `SI` (qualified) or `NO`.
   </ResponseField>
   <ResponseField name="programa" type="string">
-    Name of the academic programme.
+    Name of the academic programme from the `programa` table.
   </ResponseField>
 </ResponseField>
 
@@ -282,6 +336,12 @@ curl https://your-domain.com/api/v1/resultados_simulacro/12345678
 <ResponseField name="fecha" type="string">
   Date of the simulacro exam.
 </ResponseField>
+<ResponseField name="created_at" type="string">
+  Record creation timestamp.
+</ResponseField>
+<ResponseField name="updated_at" type="string">
+  Record last-updated timestamp.
+</ResponseField>
 
 ### Example Response
 
@@ -296,6 +356,62 @@ curl https://your-domain.com/api/v1/resultados_simulacro/12345678
   "created_at": "2024-02-11T08:00:00.000000Z",
   "updated_at": "2024-02-11T08:00:00.000000Z"
 }
+```
+
+---
+
+## GET /api/v1/get-foto-ingresante/{dni}
+
+Returns the admitted student's most recent photo as a Base64-encoded string. The image is fetched from the internal document storage server and encoded inline in the response.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/v1/get-foto-ingresante/12345678
+```
+
+### Response — HTTP 200 (found)
+
+```json
+{
+  "estado": true,
+  "foto": "data:image/jpeg;base64,/9j/4AAQSkZJRgAB...",
+  "periodo": "202401"
+}
+```
+
+### Response Fields
+
+<ResponseField name="estado" type="boolean">
+  `true` when the image was successfully retrieved.
+</ResponseField>
+<ResponseField name="foto" type="string">
+  Base64 data URI of the stored photo, prefixed with the MIME type (e.g., `data:image/jpeg;base64,...`).
+</ResponseField>
+<ResponseField name="periodo" type="string">
+  Admission period string formed by concatenating `anio` and `ciclo_oti` (e.g., `"202401"`).
+</ResponseField>
+
+### Error responses
+
+```json
+{ "status": false, "mensaje": "Registro no encontrado" }
+```
+
+```json
+{ "status": false, "mensaje": "No se pudo acceder a la imagen. Puede que la URL esté mal o el servicio no responda." }
+```
+
+```json
+{ "status": false, "mensaje": "El archivo descargado no es una imagen válida." }
 ```
 
 ---
@@ -421,7 +537,7 @@ curl -X POST https://your-domain.com/api/v1/postulante-cepre-inscrito \
 
 ## GET /api/v1/observados-cepre/{dni}
 
-Returns CEPRE observation/sanction data for a given DNI. Only active observations (`estado = 1`) are returned. This endpoint is protected by the `cepre` middleware.
+Returns CEPRE observation/sanction data for a given DNI. This endpoint is protected by the `cepre` middleware.
 
 **Authentication:** `cepre` middleware.
 
@@ -436,21 +552,4 @@ Returns CEPRE observation/sanction data for a given DNI. Only active observation
 ```bash
 curl https://your-domain.com/api/v1/observados-cepre/12345678 \
   -H "X-Cepre-Token: your-cepre-key"
-```
-
-### Response — HTTP 200 (observed)
-
-```json
-{
-  "estado": true,
-  "motivo": "INCUMPLIMIENTO DE REGLAMENTO"
-}
-```
-
-### Response — HTTP 404 (not observed)
-
-```json
-{
-  "estado": false
-}
 ```

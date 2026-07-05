@@ -1,7 +1,7 @@
 ---
 title: "Real-Time Notifications via Firebase Cloud Messaging"
 sidebarTitle: "Notifications"
-description: "Sistema de Admisión Web uses Firebase Cloud Messaging to push real-time notifications to applicants when documents are approved or rejected, and to revisors for new submissions."
+description: "FCM push and database notifications alert applicants and revisors to document events; revisor unread counts are injected as Inertia props per page render."
 ---
 
 The Sistema de Admisión Web delivers real-time notifications through a two-layer architecture: **Firebase Cloud Messaging (FCM)** for browser push notifications and **Laravel's database notification channel** for persistent in-app badges and history. When a Revisor approves, rejects, or observes an applicant's documents, both channels fire simultaneously — the applicant receives a push notification on their device and the event is stored in the `notifications` table for later retrieval. Revisors, on the other hand, receive their unread count as a server-side Inertia shared prop so the badge is always accurate on page load, with FCM filling in live updates while the tab is open.
@@ -71,6 +71,7 @@ $notificaciones = $user->notifications()
             'mensaje'                => $data['mensaje'] ?? '',
             'postulante_nombre'      => $data['postulante_nombre'] ?? '',
             'postulante_dni'         => $data['postulante_dni'] ?? '',
+            'veces'                  => $data['veces'] ?? 1,
             'documentos_verificados' => $data['documentos_verificados'] ?? [],
             'documentos_pendientes'  => $data['documentos_pendientes'] ?? [],
             'fecha_cita'             => $data['fecha_cita'] ?? null,
@@ -113,8 +114,14 @@ if ($user && $user->id_rol == 2) {
 }
 
 return array_merge(parent::share($request), [
-    // ...
-    'notificacionesNoLeidas' => $notificacionesNoLeidas,
+    'auth' => [
+        'user'        => $userData,
+        'permissions' => $permisos,
+    ],
+    'proceso_actual'          => $procesoActual,
+    'flash'                   => fn () => ['success' => $request->session()->get('success')],
+    'showingMobileMenu'       => false,
+    'notificacionesNoLeidas'  => $notificacionesNoLeidas,
 ]);
 ```
 
@@ -131,17 +138,30 @@ The Vue layout (`LayoutDocente.vue`) reads `$page.props.notificacionesNoLeidas` 
 
 ### Live FCM updates in `SolicitudesRevision.vue`
 
-The `Revisor/SolicitudesRevision.vue` page subscribes to the `fcm-message` event emitted by the `useFcm` composable. When a new push message arrives, the page reloads only the `solicitudes` Inertia prop — preserving scroll position and local UI state:
+The `Revisor/SolicitudesRevision.vue` page subscribes to the `fcm-message` event emitted by the `useNotificaciones` composable. When a new push message arrives, the page reloads only the `solicitudes` Inertia prop — preserving scroll position and local UI state:
 
 ```javascript
 // resources/js/Pages/Revisor/SolicitudesRevision.vue
-const fcm = useNotificaciones();
-fcmListener = () => router.reload({
-    only: ['solicitudes'],
-    preserveScroll: true,
-    preserveState: true,
+import { useNotificaciones } from '@/composables/useFcm';
+
+let fcmListener = null;
+
+onMounted(() => {
+    const fcm = useNotificaciones();
+    fcmListener = () => router.reload({
+        only: ['solicitudes'],
+        preserveScroll: true,
+        preserveState: true,
+    });
+    fcm.fcmEventTarget.addEventListener('fcm-message', fcmListener);
 });
-fcm.fcmEventTarget.addEventListener('fcm-message', fcmListener);
+
+onUnmounted(() => {
+    if (fcmListener) {
+        const fcm = useNotificaciones();
+        fcm.fcmEventTarget.removeEventListener('fcm-message', fcmListener);
+    }
+});
 ```
 
 Revisors are also automatically subscribed to the **`revisores` FCM topic** when their device token is registered. This allows the server to broadcast to all active reviewers simultaneously without enumerating individual tokens:
@@ -158,7 +178,7 @@ if ($user->isRevisor()) {
 
 ## FCM Token Registration Flow
 
-Device tokens are registered on every authenticated page load. The `useFcm` composable (`resources/js/composables/useFcm.js`) handles the full lifecycle: permission request, service worker registration, token retrieval, and backend sync.
+Device tokens are registered on every authenticated page load. The `useNotificaciones` composable (`resources/js/composables/useFcm.js`) handles the full lifecycle: permission request, service worker registration, token retrieval, and backend sync.
 
 ```javascript
 // resources/js/composables/useFcm.js
@@ -190,23 +210,32 @@ const activar = async () => {
 };
 ```
 
-The `init()` function is called on every page navigation via `app.js`. It silently re-registers the token if permission was already granted, ensuring the backend always has a current association between the token and the authenticated user:
+The `init()` function is called on the initial Inertia app setup in `app.js`. It silently re-registers the token if permission was already granted, ensuring the backend always has a current association between the token and the authenticated user:
 
 ```javascript
-// resources/js/app.js (Inertia lifecycle)
-router.on('navigate', async () => {
-    const currentUserId = page.props.auth?.user?.id;
+// resources/js/app.js — createInertiaApp setup()
+setup({ el, App, props, plugin }) {
+    if (props.initialPage?.props?.auth?.user) {
+        const currentUserId = props.initialPage.props.auth.user.id;
+        const storedUserId = sessionStorage.getItem('fcm_user_id');
 
-    // If user changed (e.g. different tab), clear the old token
-    const storedUserId = sessionStorage.getItem('fcm_user_id');
-    if (storedUserId && storedUserId !== String(currentUserId)) {
-        localStorage.removeItem('fcm_token');
+        if (storedUserId && storedUserId != currentUserId) {
+            localStorage.removeItem('fcm_token');
+        }
+        sessionStorage.setItem('fcm_user_id', currentUserId);
+
+        const fcm = useNotificaciones();
+        fcm.init().catch(e => console.warn('FCM init skipped:', e));
+    } else {
+        sessionStorage.removeItem('fcm_user_id');
     }
-    sessionStorage.setItem('fcm_user_id', currentUserId);
 
-    const fcm = useNotificaciones();
-    fcm.init().catch(e => console.warn('FCM init skipped:', e));
-});
+    return createApp({ render: () => h(App, props) })
+        .use(plugin)
+        .use(Antd)
+        .use(ZiggyVue, Ziggy)
+        .mount(el);
+},
 ```
 
 On logout, `fcm.logout()` deletes the token from both the backend (`DELETE /fcm-token`) and the Firebase SDK via `deleteToken(messaging)`, and removes it from `localStorage`.
@@ -253,6 +282,7 @@ All `data` values are cast to strings (`array_map('strval', $data)`) before bein
 When the browser tab is in the foreground, Firebase does not display a native notification automatically. The `onMessage` handler in `useFcm.js` intercepts the payload and forwards it to the active service worker to render:
 
 ```javascript
+// resources/js/composables/useFcm.js
 onMessage(messaging, async (payload) => {
     // Notify the layout to reload the notification list
     fcmEventTarget.dispatchEvent(new Event('fcm-message'));
@@ -278,28 +308,21 @@ The `fcm-message` custom event is listened to by both `LayoutDocente.vue` (for r
 
 ## Firebase Configuration
 
-The backend Firebase connection is configured via environment variables and the `config/firebase.php` file:
+The backend Firebase connection is configured via environment variables. The `.env.example` defines the following keys:
 
 ```bash
 # .env
 FIREBASE_PROJECT_ID=app-admision-2026
 FIREBASE_CREDENTIALS_PATH="${APP_STORAGE}/app/firebase-credentials.json"
 FIREBASE_AUTH_DOMAIN=app-admision-2026.firebaseapp.com
-FIREBASE_VAPID_KEY=<your-vapid-key>
+FIREBASE_MESSAGING_SENDER_ID=116539912844415710654
+FIREBASE_API_KEY=
+FIREBASE_APP_ID=
+FIREBASE_STORAGE_BUCKET=app-admision-2026.firebasestorage.app
+FIREBASE_VAPID_KEY=
 ```
 
-```php
-// config/firebase.php
-return [
-    'project_id'  => env('FIREBASE_PROJECT_ID', 'app-admision-2026'),
-    'credentials' => [
-        'file' => env('FIREBASE_CREDENTIALS_PATH')
-            ?: storage_path('app/firebase-credentials.json'),
-    ],
-];
-```
-
-The frontend Firebase SDK is initialized in `resources/js/firebase.js` with the project's public config (safe to expose to the browser):
+The frontend Firebase SDK is initialized in `resources/js/firebase.js` with the project's public config (safe to expose to the browser). The `FirebaseConfigController` also exposes a dynamic `GET /firebase-config` endpoint and generates the service worker at `GET /firebase-messaging-sw.js` with the config values injected server-side:
 
 ```javascript
 // resources/js/firebase.js
@@ -321,8 +344,8 @@ const messaging = getMessaging(app);
 export { messaging };
 ```
 
-The service worker file (`/firebase-messaging-sw.js`) must be served from the root of the domain for the browser to register it as a push receiver.
+The service worker is served dynamically at `/firebase-messaging-sw.js` by `FirebaseConfigController::serviceWorker()`, which injects the same environment-driven values so the background message handler always matches the active project.
 
 <Warning>
-  FCM device tokens expire or become invalid when a user clears their browser data, reinstalls the app, or when Firebase rotates the token. The `init()` function in `useFcm.js` re-registers the token on every page navigation precisely to handle this. If the stored `localStorage` token differs from the one returned by `getToken()`, a new `POST /fcm-token` request is made automatically. Always ensure the `firebase-messaging-sw.js` service worker is up to date and that `FIREBASE_CREDENTIALS_PATH` points to a valid service account JSON with the **Firebase Cloud Messaging API (V1)** permission enabled in the Google Cloud Console.
+  FCM device tokens expire or become invalid when a user clears their browser data, reinstalls the app, or when Firebase rotates the token. The `init()` function in `useFcm.js` re-registers the token on the initial page load to handle this. If the stored `localStorage` token differs from the one returned by `getToken()`, a new `POST /fcm-token` request is made automatically. Always ensure `FIREBASE_CREDENTIALS_PATH` points to a valid service account JSON with the **Firebase Cloud Messaging API (V1)** permission enabled in the Google Cloud Console.
 </Warning>

@@ -1,5 +1,5 @@
 ---
-title: "Configuring Vacancies and Ratios per Program"
+title: "Configuring Vacancies and Program Seat Allocations"
 sidebarTitle: "Vacancies"
 description: "Set the number of available seats per program and modality, configure admission ratios, and track occupancy across active admission processes."
 ---
@@ -82,7 +82,7 @@ The response includes every academic program at the process's `nivel` (1 = under
 </Steps>
 
 ```bash
-# Create a new vacancy record
+# Create a new vacancy record (id_vacante absent or null)
 POST /admin/save-numero-vacantes
 Content-Type: application/json
 
@@ -92,12 +92,13 @@ Content-Type: application/json
   "vacantes": 80
 }
 
-# Update an existing record
+# Update an existing record (id_vacante present)
 POST /admin/save-numero-vacantes
 Content-Type: application/json
 
 {
   "id_vacante": 47,
+  "id_programa": 3,
   "id_modalidad": 1,
   "vacantes": 95
 }
@@ -109,7 +110,17 @@ Content-Type: application/json
 {
   "titulo": "REGISTRO NUEVO",
   "estado": true,
-  "datos": { "id": 47, "id_programa": 3, "vacantes": 80, ... }
+  "datos": { "id": 47, "id_programa": 3, "vacantes": 80, "id_proceso": 14, "id_modalidad": 1, "estado": 1 }
+}
+```
+
+**Success response (update):**
+
+```json
+{
+  "titulo": "!REGISTRO MODIFICADO!",
+  "estado": true,
+  "datos": { "id": 47, "vacantes": 95, "estado": 1 }
 }
 ```
 
@@ -134,11 +145,11 @@ Administrators can view a condensed pivot matrix of all programs and their activ
 GET /admin/get-programas-proceso
 ```
 
-Each row represents a program (`nombre_corto`) and each column corresponds to a modality ID (1–9). Cells contain `"SI"` when an active vacancy exists, or `"-"` when the combination is not configured. This gives a quick bird's-eye view of the entire process configuration.
+Each row represents a program and each column corresponds to a modality ID. Cells contain `"SI"` when an active vacancy exists, or `"-"` when the combination is not configured. This gives a quick bird's-eye view of the entire process configuration.
 
 ## Ratio Configuration
 
-Ratios (`Ratio`) allow the results engine to weight or cap admissions by applicant category within a program. For example, a program might reserve 5% of seats for applicants from rural schools or top-performing secondary graduates. The ratio configuration screen is available at:
+Ratios (`Ratio`) allow the results engine to weight or cap admissions by applicant category within a program. The ratio configuration screen is available at:
 
 ```
 GET /admin/ratio
@@ -148,23 +159,29 @@ Ratios are consulted during result generation to ensure proportional distributio
 
 ## Dropdown Selects for Vacancy-Scoped Queries
 
-Other modules (results, reports, biometric summary) need to present only modalities or programs that actually have vacancies in the current process. Two helper endpoints serve these dropdowns:
+Other modules (results, reports, biometric summary) need to present only modalities or programs that actually have vacancies in the current process. The following helper endpoints serve these dropdowns. Note that all three routes below exist outside the `/admin` prefix and are globally accessible to authenticated users:
 
 ```bash
-# Modalities with at least one vacancy in a process
-GET /admin/get-select-modalidades-proceso/{id_proceso}
+# Modalities with at least one vacancy in a specific process
+GET /get-select-modalidad-proceso/{id}
 
-# Programs with active vacancies for a modality+process
-POST /admin/get-select-programas-proceso
+# Programs with active vacancies for a given modality + process
+POST /get-select-programas-proceso
 { "id_modalidad": 1, "id_proceso": 14 }
 
-# Programs with active vacancies (admin context, current process)
-GET /admin/get-select-programas-proceso-admin
-
-# Programs filtered by modality, process, and academic area
-POST /admin/get-select-programas-proceso-area
+# Programs with active vacancies filtered by modality, process, and academic area
+POST /get-select-programas-proceso-area
 { "id_modalidad": 1, "id_proceso": 14, "area": "BIOMÉDICAS" }
 ```
+
+The admin-scoped endpoint for the current user's active process is available under the admin prefix:
+
+```bash
+# Programs with active vacancies (admin context, uses auth()->user()->id_proceso)
+GET /admin/get-select-programas-proceso-admin
+```
+
+Both `GET /get-select-modalidad-proceso/{id}` and `POST /get-select-programas-proceso` return `{ "estado": true, "datos": [ { "value": <id>, "label": "<name>" }, ... ] }`.
 
 ## How Vacancies Affect Results
 
@@ -180,8 +197,8 @@ To understand seat fill rates, combine the vacancy count from `vacantes.vacantes
 
 | Status | How to identify |
 |--------|----------------|
-| **Unconfigured** | `vacantes.id_vacante IS NULL` in the vacancy list response |
-| **Empty** | `vacantes = 0` — process seats set to zero |
+| **Unconfigured** | `id_vacante IS NULL` in the vacancy list response |
+| **Empty** | `vacantes = 0` — seats set to zero |
 | **Under capacity** | `inscripciones_count < vacantes` |
 | **At capacity** | `inscripciones_count = vacantes` |
 | **Over-inscribed** | `inscripciones_count > vacantes` (normal — final selection happens at results stage) |

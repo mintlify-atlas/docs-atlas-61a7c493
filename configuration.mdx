@@ -1,7 +1,7 @@
 ---
-title: "Configure Sistema de Admisión Web Environment"
+title: "Configure Sistema de Admisión Web: .env Variables"
 sidebarTitle: "Configuration"
-description: "Reference for all environment variables in .env.example — database, cache, mail, Firebase, payment, and external API settings."
+description: "Reference for all environment variables in .env.example — database, cache, logging, mail, Firebase, broadcasting, AWS, and Vite frontend settings."
 ---
 
 All runtime configuration for Sistema de Admisión Web is managed through a single `.env` file in the project root. Laravel reads these values at boot time and exposes them to the application via the `env()` helper and the `/config` directory. No sensitive credentials are ever hard-coded in source files — every integration key, database password, and service URL belongs in `.env` and nowhere else.
@@ -38,6 +38,24 @@ These variables control the core Laravel application identity, runtime mode, and
 
 <ParamField body="APP_URL" type="string" default="http://localhost">
   The fully qualified public URL of the application, including the scheme. Used by Laravel to generate absolute URLs (e.g., in emails and signed routes). Example: `https://admision.unap.edu.pe`.
+</ParamField>
+
+---
+
+## Logging
+
+These variables configure how Laravel writes application logs. Logs capture errors, deprecation warnings, and debug output from all layers of the application.
+
+<ParamField body="LOG_CHANNEL" type="string" default="stack">
+  The default logging channel. `stack` aggregates multiple channels (defined in `config/logging.php`). Other common values: `single` (one file), `daily` (rotated daily), `stderr` (for containerised deployments).
+</ParamField>
+
+<ParamField body="LOG_DEPRECATIONS_CHANNEL" type="string" default="null">
+  The channel used to log PHP and Laravel deprecation notices. Set to `null` to discard deprecation messages, or point it to a named channel (e.g., `daily`) to capture them during upgrades.
+</ParamField>
+
+<ParamField body="LOG_LEVEL" type="string" default="debug">
+  The minimum severity level that will be written to the log. Valid values follow the RFC 5424 scale: `debug`, `info`, `notice`, `warning`, `error`, `critical`, `alert`, `emergency`. In production, set to `error` or `warning` to reduce log volume.
 </ParamField>
 
 ---
@@ -80,6 +98,10 @@ These variables control where Laravel stores cached data, how background jobs ar
   The cache backend. `file` stores cache entries in `storage/framework/cache`. Switch to `redis` for distributed caching across multiple app servers.
 </ParamField>
 
+<ParamField body="FILESYSTEM_DISK" type="string" default="local">
+  The default filesystem disk used for file storage operations. `local` stores files under `storage/app`. Switch to `s3` to store uploads in an AWS S3 bucket (requires the `AWS_*` variables below).
+</ParamField>
+
 <ParamField body="QUEUE_CONNECTION" type="string" default="database">
   Where queued jobs are stored. `database` uses the `jobs` table (created by `php artisan migrate`). Switch to `redis` for higher throughput in production.
 </ParamField>
@@ -108,6 +130,16 @@ Redis is used as a drop-in backend for cache, queue, and session storage when `C
 
 <ParamField body="REDIS_PORT" type="integer" default="6379">
   TCP port on which Redis is listening. The default Redis port is `6379`.
+</ParamField>
+
+---
+
+## Memcached
+
+Memcached can be used as an alternative cache backend when `CACHE_DRIVER=memcached`.
+
+<ParamField body="MEMCACHED_HOST" type="string" default="127.0.0.1">
+  Hostname or IP address of the Memcached server. Only required when `CACHE_DRIVER` is set to `memcached`.
 </ParamField>
 
 ---
@@ -226,6 +258,32 @@ Broadcasting powers real-time frontend updates. The `BROADCAST_DRIVER` and Pushe
 
 ---
 
+## Vite Frontend Variables
+
+These variables are prefixed with `VITE_` so that Vite exposes them to the frontend JavaScript bundle at build time. They mirror their server-side Pusher counterparts and are used by the Laravel Echo / Pusher JS client in the browser.
+
+<ParamField body="VITE_PUSHER_APP_KEY" type="string" default="${PUSHER_APP_KEY}">
+  Mirrors `PUSHER_APP_KEY`. Injected into the Vite build as `import.meta.env.VITE_PUSHER_APP_KEY` for the browser-side Pusher client.
+</ParamField>
+
+<ParamField body="VITE_PUSHER_HOST" type="string" default="${PUSHER_HOST}">
+  Mirrors `PUSHER_HOST`. Used by the frontend WebSocket client to connect to the correct host.
+</ParamField>
+
+<ParamField body="VITE_PUSHER_PORT" type="string" default="${PUSHER_PORT}">
+  Mirrors `PUSHER_PORT`. Used by the frontend WebSocket client.
+</ParamField>
+
+<ParamField body="VITE_PUSHER_SCHEME" type="string" default="${PUSHER_SCHEME}">
+  Mirrors `PUSHER_SCHEME`. Determines whether the browser opens a `wss://` (https) or `ws://` (http) WebSocket connection.
+</ParamField>
+
+<ParamField body="VITE_PUSHER_APP_CLUSTER" type="string" default="${PUSHER_APP_CLUSTER}">
+  Mirrors `PUSHER_APP_CLUSTER`. Used by the browser Pusher client to route to the correct regional cluster.
+</ParamField>
+
+---
+
 ## AWS (S3 / SES)
 
 These variables enable AWS S3 file storage and/or Amazon SES as the mail transport. They are also read by `config/services.php` for the `ses` driver.
@@ -244,4 +302,8 @@ These variables enable AWS S3 file storage and/or Amazon SES as the mail transpo
 
 <ParamField body="AWS_BUCKET" type="string" default="">
   The S3 bucket name used for file storage when `FILESYSTEM_DISK=s3`. Leave empty if using local or other storage drivers.
+</ParamField>
+
+<ParamField body="AWS_USE_PATH_STYLE_ENDPOINT" type="boolean" default="false">
+  When `true`, the S3 client uses path-style URLs (`https://s3.amazonaws.com/{bucket}/key`) instead of virtual-hosted-style URLs (`https://{bucket}.s3.amazonaws.com/key`). Set to `true` when using S3-compatible services such as MinIO or LocalStack.
 </ParamField>

@@ -1,7 +1,7 @@
 ---
 title: "Score Entry and Grade Management for Calificadores"
 sidebarTitle: "Scoring"
-description: "Calificadores enter applicant scores per exam component, manage puntaje records, and view vocational exam results from the dedicated scoring panel at /calificacion."
+description: "Calificadores enter applicant scores per exam component, manage puntaje records, and review vocational exam results from the scoring panel."
 ---
 
 The Calificación module is the grade-entry interface used by exam scorers after an admission exam session. Calificadores are responsible for inputting raw scores for each applicant by knowledge area and sub-component, verifying those values against vocational exam data, and confirming that the records are ready for publication into the final results. All scoring work happens within the protected `/calificacion/*` route namespace.
@@ -38,7 +38,7 @@ The `puntajes` table links an applicant (`dni`), an admission process (`id_proce
 | `paterno`, `materno`, `nombres` | Applicant name fields |
 | `fecha` | Score entry date |
 
-The combined admission score used for ranking is `puntaje + puntaje_vocacional`. Maximum scores per area are queried by `PuntajeController@getPunajesMaximos`:
+The combined admission score used for ranking is `puntaje + puntaje_vocacional`. Maximum scores per area are queried by `PuntajeController@getPunajesMaximos` (`GET /get-puntajes-maximos-proceso/{p}`):
 
 ```php
 // PuntajeController.php
@@ -64,24 +64,41 @@ $res = DB::select("
 
 <Steps>
   <Step title="Log in as Calificador — redirected to /calificacion">
-    After successful authentication with a `id_rol = 7` account, the system automatically redirects to the Calificación panel (`/calificacion`). This panel renders the `Simulacro/Calificacion/lecturas` Inertia view and uses `LayoutCalificador.vue` as its shell layout.
+    After successful authentication with a `id_rol = 7` account, the system automatically redirects to the Calificación panel (`/calificacion`). This panel renders the `Simulacro/Calificacion/calificacion` Inertia view and uses `LayoutCalificador.vue` as its shell layout.
 
-    The `SubirResultado.vue` component (also accessible from this layout) allows bulk-uploading exam results from an XLSX file before individual score entry begins.
+    The `SubirResultado` view (accessible at `GET /calificacion/subir-resultado`) allows bulk-uploading exam results from an XLSX file before individual score entry begins.
   </Step>
 
   <Step title="Select the process / exam">
     The Calificador selects the active admission process. The process identifier is scoped per authenticated user via `auth()->user()->id_proceso`, so each Calificador only sees the exam batch assigned to them. The scoring panel displays the correct set of applicants automatically based on this scoped process.
   </Step>
 
-  <Step title="Enter scores per applicant (PuntajeController)">
-    Scores are entered per applicant through the admin scoring panel. `PuntajeController@getPunajesMaximos` is used to validate entries against the theoretical maximum for each area. The scoring interface also provides payment reconciliation through:
+  <Step title="Upload and process answer data (ResultadosController)">
+    Scores are loaded from physical answer sheets through a set of bulk-operation endpoints under the `/calificacion` prefix, all handled by `ResultadosController`:
 
-    - `POST /get-pagos-dni/{dni}` — retrieve confirmed payments for a given applicant
+    | Endpoint | Method | Description |
+    |---|---|---|
+    | `POST /calificacion/subir-excel-simulacro` | `SubirResultado` | Bulk-import scores from XLSX |
+    | `POST /calificacion/carga-ide` | `cargaArchivoIde` | Load IDE identification data |
+    | `POST /calificacion/actualizar-ide` | `actualizarIde` | Update existing IDE data |
+    | `POST /calificacion/carga-ide/{proceso}/{area}` | `cargaArchivoIde` | Process-scoped IDE load (no web middleware) |
+    | `POST /calificacion/carga-res/{proceso}` | `cargaArchivoRes` | Load response answer data (no web middleware) |
+    | `POST /calificacion/carga-pat/{proceso}` | `cargaArchivoPat` | Load answer pattern/key (no web middleware) |
+    | `GET /calificacion/leer-ide/{area}` | `leerIde` | Validate uploaded IDE file for an area |
+    | `GET /calificacion/get-select-puestos/{id_proceso}` | `selectPuestos` | Fetch ranked position list |
+    | `GET /calificacion/descargar-excel` | `descargarExcel` | Full results XLSX download |
+    | `POST /get-puntaje-simulacro` | `getResultados` | Retrieve computed scores |
+  </Step>
+
+  <Step title="Manage cash payments (PagoSimulacroController)">
+    The scoring panel also provides payment reconciliation for applicants who paid in-person. These three root-level endpoints are handled by `PagoSimulacroController`:
+
+    - `GET /get-pagos-dni/{dni}` — retrieve confirmed payments for a given applicant
     - `POST /insertar-pago` — manually insert a cash-payment record into `pagos_general`
-    - `DELETE /eliminar-pago/{dni}/{operacion}` — remove a mistakenly recorded payment
+    - `GET /eliminar-pago/{dni}/{operacion}` — remove a mistakenly recorded payment
 
     ```php
-    // PuntajeController@insertarPago
+    // PagoSimulacroController@insertarPago
     DB::table('pagos_general')->insert([
         'dni'      => $req['dni'],
         'operacion'=> $req['operacion'],
@@ -96,7 +113,7 @@ $res = DB::select("
   </Step>
 
   <Step title="View and verify vocational exam details (DetalleExamenVocacionalController)">
-    Alongside the main exam score, each applicant completes a vocational orientation test. Calificadores can view and record these results through two endpoints managed by `DetalleExamenVocacionalController`:
+    Alongside the main exam score, each applicant completes a vocational orientation test. Calificadores can view and record these results through two root-level endpoints managed by `DetalleExamenVocacionalController`:
 
     ```
     POST /save-respuesta   → saveRespuesta  — saves a single vocational exam answer
@@ -105,39 +122,37 @@ $res = DB::select("
 
     Both methods write to the `detalle_examen_vocacional` table, linking the applicant's response to the vocational exam item. The resulting `puntaje_vocacional` is then combined with the area score to produce the final ranking value.
 
-    The scoring panel also provides a dedicated calificación sub-view at `GET /simulacro/calificacion` (rendered as `Simulacro/Ficha`) where vocational answer sheets can be reviewed side-by-side with the applicant's main exam.
-  </Step>
-
-  <Step title="Scores flow into final results (ResultadosController)">
-    Once all scores are entered and verified, the `ResultadosController` handles the final result publication pipeline through a set of bulk-operation endpoints:
-
-    | Endpoint | Method | Description |
-    |---|---|---|
-    | `POST /simulacros/subir-excel-simulacro` | `SubirResultado` | Bulk-import scores from XLSX |
-    | `POST /simulacros/carga-ide/{proceso}/{area}` | `cargaArchivoIde` | Load IDE identification data |
-    | `POST /simulacros/carga-res/{proceso}` | `cargaArchivoRes` | Load response answer data |
-    | `POST /simulacros/carga-pat/{proceso}` | `cargaArchivoPat` | Load answer pattern/key |
-    | `POST /simulacros/get-puntaje-simulacro` | `getResultados` | Retrieve computed scores |
-    | `GET /simulacros/get-select-puestos/{id_proceso}` | `selectPuestos` | Fetch ranked position list |
-
-    The `leerIde/{area}` endpoint (`GET /simulacros/leer-ide/{area}`) reads and validates the uploaded identification file for a given area before scores are committed, acting as a pre-publication check. Once validation passes, the Calificador can trigger publication and results become visible to applicants.
+    The scoring panel also provides a dedicated calificación sub-view at `GET /calificacion/calificacion` (rendered as `Simulacro/Calificacion/lecturas`) and a ponderaciones management view at `GET /calificacion/ponderacion` (rendered as `Simulacro/Calificacion/ponderacion`).
   </Step>
 </Steps>
 
 ---
 
+## Ponderación Management
+
+Scoring weights for each exam area are managed through `PonderacionController` under the `/calificacion` prefix:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `POST /calificacion/save-ponderacion` | `save` | Create or update a ponderación record |
+| `POST /calificacion/get-ponderaciones` | `getPonderaciones` | List all ponderación records |
+| `POST /calificacion/save-ponderacion-detalle` | `insertarPonderacion` | Insert a ponderación detail entry |
+| `POST /calificacion/get-ponderaciones-select` | `getPonderacionesSelect` | Ponderación options for selectors |
+
+---
+
 ## Score Download and Reporting
 
-Calificadores can export results in area-segmented Excel files for archival and audit purposes:
+Calificadores can export results in area-segmented files for archival and audit purposes:
 
 | Endpoint | Description |
 |---|---|
-| `GET /simulacros/descargar-excel` | Full results XLSX download |
-| `GET /simulacros/descargar-ingenierias` | Engineering area exam data |
-| `GET /simulacros/descargar-biomedicas` | Biomedical area exam data |
-| `GET /simulacros/descargar-sociales` | Social sciences area exam data |
+| `GET /calificacion/descargar-excel` | Full results XLSX download |
+| `GET /descargar-ingenierias` | Engineering area exam data |
+| `GET /descargar-biomedicas` | Biomedical area exam data |
+| `GET /descargar-sociales` | Social sciences area exam data |
 
-These methods on `ResultadosController` generate downloadable Excel files and are accessible only to authenticated Calificador users.
+These methods on `ResultadosController` generate downloadable files and are accessible to authenticated users.
 
 ---
 

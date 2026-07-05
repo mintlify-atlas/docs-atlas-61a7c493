@@ -16,6 +16,16 @@ curl -X POST https://your-domain.com/api/login \
   -d '{"email": "usuario@unap.edu.pe", "password": "yourpassword"}'
 ```
 
+### Request Fields
+
+<ParamField body="email" type="string" required>
+  The user's email address. Must be a valid email format and no longer than 100 characters.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password.
+</ParamField>
+
 ### Successful response — HTTP 200
 
 ```json
@@ -32,6 +42,21 @@ curl -X POST https://your-domain.com/api/login \
   "token": "1|abcdefghijklmnopqrstuvwxyz..."
 }
 ```
+
+### Response Fields
+
+<ResponseField name="status" type="boolean">
+  `true` when authentication succeeded.
+</ResponseField>
+<ResponseField name="message" type="string">
+  Human-readable confirmation message.
+</ResponseField>
+<ResponseField name="data" type="object">
+  The authenticated user record from the `users` table.
+</ResponseField>
+<ResponseField name="token" type="string">
+  The plain-text Sanctum personal access token. Include this value as `Bearer {token}` in the `Authorization` header of subsequent requests.
+</ResponseField>
 
 ### Validation error — HTTP 400
 
@@ -87,7 +112,7 @@ curl https://your-domain.com/api/get-codigo-conexion/MY_CODE_HERE
 
 ## Mobile App Authentication (`/api/app`)
 
-The API also exposes a dedicated authentication group for the mobile application at `/api/app/login` and `/api/app/registro`. These endpoints follow the same Sanctum token flow but validate against `email` + `password` and return a slightly different response shape.
+The API exposes a dedicated authentication group for the mobile application at `/api/app/login` and `/api/app/registro`. These endpoints follow the same Sanctum token flow but validate `email` and `password`, revoke any previous tokens on login, and return a response envelope that uses `success` instead of `status`.
 
 ```bash
 curl -X POST https://your-domain.com/api/app/login \
@@ -107,6 +132,15 @@ curl -X POST https://your-domain.com/api/app/login \
     "email": "usuario@unap.edu.pe",
     "id_rol": 8
   }
+}
+```
+
+### Mobile login — invalid credentials — HTTP 401
+
+```json
+{
+  "success": false,
+  "message": "Credenciales inválidas"
 }
 ```
 

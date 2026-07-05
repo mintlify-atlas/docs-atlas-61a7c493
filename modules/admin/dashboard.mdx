@@ -1,10 +1,10 @@
 ---
 title: "Admin Dashboard: Monitoring Admissions in Real Time"
 sidebarTitle: "Dashboard"
-description: "The administrator dashboard provides a real-time overview of active processes, registered applicants, document review status, payments, and system health."
+description: "KPI cards and charts for the active admission process. Covers pre-registrations, inscriptions, biometric progress, demographic reports, and audit trail."
 ---
 
-The admin dashboard is the central command panel for the Sistema de Admisión Web. Every time the administrator logs in, they land at `/admin/dashboard` where all key metrics for the currently active admission process are assembled in a single view. Charts refresh on page load via parallel asynchronous requests, so the figures always reflect the latest database state without requiring a manual refresh.
+The admin dashboard is the central command panel for the Sistema de Admisión Web. Every time the administrator logs in, they land at `/admin/dashboard` where all key metrics for the currently active admission process are assembled in a single view. Charts refresh on page load via parallel asynchronous requests, so the figures always reflect the latest database state without requiring a manual page refresh.
 
 <Note>
   Access to the admin dashboard and all routes under the `/admin/*` prefix requires `id_rol = 1`. The `Admin` middleware (`app/Http/Middleware/Admin.php`) enforces this check on every request and returns HTTP 403 if the authenticated user does not meet the requirement. Login automatically redirects users with `id_rol = 1` to `/admin/dashboard`.
@@ -19,15 +19,48 @@ The top row of the dashboard surfaces four KPI cards, each scoped to the process
 | **Preinscritos** | Total pre-registrations in the active process | `pre_inscripcion` | `preinscritos_hoy` |
 | **Inscritos** | Completed enrollments (`estado = 0`) | `inscripciones` | `inscritos_hoy` |
 | **Ctrl. Biométrico** | Biometric captures recorded | `control_biometrico` | `biometricos_hoy` |
-| **Ingresantes Total** | Admitted applicants (`apto = 'SI'`) | `resultados` | Exam date(s) |
+| **Postulantes** | Applicants linked to an inscription (`estado = 0`) | `postulante` joined to `inscripciones` | — |
 
-All four counters are fetched in a single call to `GET /admin/dashboard/resumen-general`, which returns a JSON object with the keys `preinscritos`, `inscritos`, `biometricos`, `postulantes`, `preinscritos_hoy`, `inscritos_hoy`, and `biometricos_hoy`.
+All four counters are fetched in a single call to `GET /admin/dashboard/resumen-general`, which returns a JSON object under the `datos` key with the following fields:
+
+```bash
+GET /admin/dashboard/resumen-general
+```
+
+```json
+{
+  "success": true,
+  "datos": {
+    "preinscritos": 2310,
+    "inscritos": 1840,
+    "biometricos": 615,
+    "postulantes": 1835,
+    "preinscritos_hoy": 12,
+    "inscritos_hoy": 8,
+    "biometricos_hoy": 3
+  }
+}
+```
+
+## Legacy KPI Endpoints
+
+In addition to the unified `resumen-general` endpoint, two older endpoints remain active and are consumed by some dashboard widgets:
+
+```bash
+# Total pre-registrations + last registration date
+GET /admin/get-preinscritos
+
+# Total inscriptions (estado = 0) + last registration date
+GET /admin/get-inscritos
+```
+
+Both return `{ "estado": true, "preinscritos"/"inscritos": <count>, "fecha": { "count": N, "date": "YYYY-MM-DD" } }`.
 
 ## Biometric Progress Bar
 
-Below the KPI cards, a full-width progress bar tracks how many admitted applicants (`total_ingresantes`) have completed biometric registration (`con_biometrico`). The percentage is calculated server-side by `DashboardController::biometricoResumen()` and displayed as a gradient bar. The card also breaks down biometric coverage by academic area (INGENIERÍAS, BIOMÉDICAS, SOCIALES).
+Below the KPI cards, a full-width progress bar tracks how many admitted applicants (`total_ingresantes`) have completed biometric registration (`con_biometrico`). The percentage is calculated server-side by `DashboardController::biometricoResumen()` and displayed as a gradient bar. The card also breaks down biometric coverage by academic area.
 
-```
+```bash
 GET /admin/dashboard/biometrico-resumen
 ```
 
@@ -57,38 +90,52 @@ The dashboard renders seven interactive Chart.js visualisations (Line, Bar, Doug
 
 <CardGroup cols={2}>
   <Card title="Inscripciones por Fecha" icon="chart-line">
-    A line chart displaying the daily inscription count as a time-series.  
+    A line chart displaying the daily inscription count as a time-series.
     Endpoint: `GET /admin/dashboard/timeline-inscripciones`
   </Card>
   <Card title="Inscripciones por Género y Área" icon="chart-bar">
-    Grouped bar chart comparing male (`sexo = 1`) and female (`sexo = 2`) applicants across each academic area.  
+    Grouped bar chart comparing male (`sexo = 1`) and female (`sexo = 2`) applicants across each academic area.
     Endpoint: `GET /admin/dashboard/genero-por-area`
   </Card>
   <Card title="Postulantes por Área" icon="chart-pie">
-    Doughnut chart breaking down total applicants by INGENIERÍAS, BIOMÉDICAS, and SOCIALES.  
+    Doughnut chart breaking down total applicants by academic area (e.g. INGENIERÍAS, BIOMÉDICAS, SOCIALES).
     Endpoint: `GET /admin/dashboard/postulantes-por-area`
   </Card>
   <Card title="Distribución por Modalidad" icon="chart-pie">
-    Doughnut chart showing how inscriptions are distributed across admission modalities (e.g. Ordinario, Especial).  
+    Doughnut chart showing how inscriptions are distributed across admission modalities (e.g. Ordinario, Especial).
     Endpoint: `GET /admin/dashboard/modalidad-distribucion`
   </Card>
   <Card title="Top Programas con más Inscritos" icon="list-ol">
-    Horizontal bar chart of the top 15 academic programs by inscription count, colour-coded by area.  
+    Horizontal bar chart of the top 15 academic programs by inscription count, colour-coded by area.
     Endpoint: `GET /admin/dashboard/inscritos-por-programa`
   </Card>
   <Card title="Tipo de Colegio" icon="school">
-    Pie chart showing the `gestion` distribution of applicants' secondary schools (public vs private).  
+    Pie chart showing the `gestion` distribution of applicants' secondary schools (public vs private).
     Endpoint: `GET /admin/dashboard/tipo-colegio-distribucion`
   </Card>
   <Card title="Biométrico por Área" icon="fingerprint">
-    Grouped bar chart comparing total admitidos vs biometric-registered vs pending per area.  
+    Grouped bar chart comparing total admitidos vs biometric-registered vs pending per area.
     Endpoint: `GET /admin/dashboard/biometrico-resumen`
   </Card>
   <Card title="Mejores Inscriptores" icon="users">
-    Ranked list of the top staff members who registered the most inscriptions, with a relative progress bar.  
+    Ranked list of the top staff members who registered the most inscriptions, with a relative progress bar.
     Endpoint: `GET /admin/get-mejores-inscriptores`
   </Card>
 </CardGroup>
+
+### Top Inscriptores Endpoints
+
+Two endpoints exist for the "Mejores Inscriptores" widget. The first returns the top 4 by total count; the second returns up to 5 users who have recorded more than 5 inscriptions, ordered ascending (reversed for display):
+
+```bash
+# Top 4 inscriptors overall (GET)
+GET /admin/get-mejores-inscriptores
+
+# Top 5 inscriptors with > 5 inscriptions (POST)
+POST /admin/get-mejores-inscriptores-dia
+```
+
+Both return `{ "estado": true, "inscriptores": [ { "cant": N, "name": "...", "paterno": "...", "materno": "..." }, ... ] }`.
 
 ## Demographic Reports
 
@@ -99,13 +146,15 @@ From the dashboard's reporting sub-panel (`/admin/component`), administrators ca
 | Gender distribution | `GET /admin/get-inscritos-genero-reporte` | Inscription count grouped by `postulante.sexo` |
 | Age distribution | `GET /admin/get-inscritos-edad-reporte` | Top 7 age groups (`TIMESTAMPDIFF(YEAR, fec_nacimiento, CURDATE())`) |
 | Residence | `GET /admin/get-inscritos-residencia-reporte` | Top 6 department/province/district combinations |
-| Origin | `GET /admin/get-inscritos-procedencia-reporte` | Top 8 birth-place combinations |
-| Graduation year | `GET /admin/get-inscritos-egreso-reporte` | Top 7 high school graduation years |
+| Origin (birth place) | `GET /admin/get-inscritos-procedencia-reporte` | Top 8 birth-place combinations |
+| Graduation year | `GET /admin/get-inscritos-egreso-reporte` | Top 7 high school graduation years (`postulante.anio_egreso`) |
 | Disability | `GET /admin/get-inscritos-discapacidad-reporte` | Count by `postulante.discapacidad` value |
-| Document type | `GET /admin/get-inscritos-tipo-documento-reporte` | DNI vs foreign document counts |
-| Top schools | `GET /admin/get-inscritos-colegio-reporte` | Top 7 schools by cod_modular |
-| School origin | `GET /admin/get-inscritos-procedencia-colegio-reporte` | Top 7 school locations |
-| School type | `GET /admin/get-inscritos-tipo-colegio-reporte` | Public vs private schools |
+| Document type | `GET /admin/get-inscritos-tipo-documento-reporte` | Counts grouped by `tipo_documento_identidad.nombre` |
+| Top schools | `GET /admin/get-inscritos-colegio-reporte` | Top 7 schools by `colegios.cod_modular` |
+| School origin | `GET /admin/get-inscritos-procedencia-colegio-reporte` | Top 7 school locations (dep/prov/dist) |
+| School type | `GET /admin/get-inscritos-tipo-colegio-reporte` | Grouped by `colegios.gestion` (public vs private) |
+
+All ten endpoints return `{ "datos": [...], "estado": true }` and are consumed by the Chart.js visualisations in `Admin/Dashboard/components/reportes.vue`.
 
 ## Navigating to Submodules
 
@@ -115,7 +164,7 @@ The `AuthenticatedLayout` sidebar provides direct links to all admin submodules.
 - **Vacantes** (`/admin/vacantes`) — Set seat limits per program and modality
 - **Inscripciones** (`/admin/inscripciones`) — Browse and manage enrollments
 - **Control Biométrico** (`/admin/control-biometrico`) — Biometric registration tracking
-- **Usuarios** — Staff account management
+- **Usuarios** (`/admin/usuarios`) — Staff account management
 - **Reportes / Resúmenes** — Export reports as PDF or Excel
 - **Trazabilidad** (`/admin/trazabilidad`) — Full audit trail
 
@@ -130,7 +179,17 @@ Content-Type: application/json
 { "id_proceso": 12 }
 ```
 
-This updates `users.id_proceso` for the authenticated user. All subsequent dashboard requests then aggregate data against the new process ID.
+This updates `users.id_proceso` for the authenticated user via `ProcesoController::cambiarProceso()`. All subsequent dashboard requests then aggregate data against the new process ID.
+
+## Applicant Profile Lookup
+
+Administrators can view a full applicant profile from the dashboard by navigating to `/admin/perfil-postulante` or by using the DNI lookup:
+
+```bash
+GET /admin/postulante-perfil/{dni}
+```
+
+`DashboardController::showPostulante()` renders the `Admin/Postulante/Perfil` Inertia page with pre-inscription counts, inscription history, biometric count, colegio data, a photo URL, and any linked user account.
 
 ## Audit Trail Access
 

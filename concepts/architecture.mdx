@@ -1,7 +1,7 @@
 ---
-title: "Platform Architecture: Laravel, Vue 3, and Inertia.js"
+title: "Sistema de Admisión Web Architecture: Laravel and Vue 3"
 sidebarTitle: "Architecture"
-description: "Understand how Sistema de Admisión Web is structured — Laravel 11 backend, Vue 3 SPA frontend via Inertia.js, MySQL database, Redis cache, and Firebase for push notifications."
+description: "How Sistema de Admisión Web is structured: Laravel 11 backend, Vue 3 SPA via Inertia.js, MySQL database, Redis, and Firebase push notifications."
 ---
 
 Sistema de Admisión Web is built as a **monolithic full-stack application** that uses Laravel 11 as the backend and Vue 3 as the frontend, stitched together by Inertia.js. There is no separate API consumed by the frontend — Inertia acts as the bridge, letting Laravel controllers return Vue page components directly instead of JSON responses. The browser only ever loads a single root Blade template (`resources/views/app.blade.php`), and every subsequent navigation is an Inertia visit that swaps the active Vue component without a full page reload, giving applicants and administrators an SPA experience with none of the complexity of a decoupled frontend.
@@ -50,8 +50,8 @@ The frontend lives entirely inside `resources/js/` and is bundled by Vite.
 
 | Layer | Technology | Version |
 |---|---|---|
-| Framework | Vue 3 (Composition API) | — |
-| SPA bridge | Inertia.js (`@inertiajs/inertia-vue3`) | ^0.6.0 |
+| Framework | Vue 3 (Composition API) | ^3.2.41 |
+| SPA bridge | Inertia.js (`@inertiajs/vue3`) | ^1.0.0 |
 | UI components | Ant Design Vue | ^4.2.6 |
 | Utility CSS | Tailwind CSS | (via `tailwind.config.js`) |
 | Bundler | Vite | (via `vite.config.js`) |
@@ -68,14 +68,14 @@ Rather than one monolithic `web.php`, routes are split across multiple files, ea
 
 ```php
 require __DIR__.'/auth.php';     // Login, register, password reset (Laravel Breeze)
+require __DIR__.'/revisor.php';  // /revisor/* — document review module
 require __DIR__.'/segundas.php'; // /segundas/* — segundas admissions module
 require __DIR__.'/adminv2.php';  // /admin/v2/* — next-gen admin pages
-// web.php itself contains:
-//   Route::prefix('admin')->middleware('auth','admin')->group(...)   → /admin/*
-//   Route::prefix('revisor')->middleware('auth','revisor')->group(...) → /revisor/* (revisor.php)
-//   Route::prefix('postulante')->middleware('auth')->group(...)      → /postulante/*
-//   Route::prefix('simulacro')->middleware('auth','simulacro')       → /simulacro/*
-//   Route::prefix('calificacion')->middleware('auth','calificador')  → /calificacion/*
+// web.php itself also defines inline route groups:
+//   Route::prefix('admin')->middleware('auth','admin')->group(...)       → /admin/*
+//   Route::prefix('postulante')->middleware('auth')->group(...)          → /postulante/*
+//   Route::prefix('simulacro')->middleware('auth','simulacro')->group(…) → /simulacro/*
+//   Route::prefix('calificacion')->middleware('auth','calificador')      → /calificacion/*
 ```
 
 Each route group is protected by its corresponding role middleware (see [Roles & Permissions](/concepts/roles-permissions)).

@@ -41,32 +41,68 @@ Most endpoints have no explicit rate limit beyond Laravel's default. The `POST /
 
 ## Endpoint Reference
 
-The table below lists every publicly documented API route, its HTTP method, authentication requirement, and purpose.
+The table below lists every documented API route, its HTTP method, authentication requirement, and purpose.
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/health` | None | System health check (database + storage) |
 | `POST` | `/login` | None | Obtain a Sanctum Bearer token |
 | `GET` | `/get-codigo-conexion/{codigoConexion}` | None | Look up a connection code |
-| `GET` | `/get-ingresante/{dni}/{anio}/{ciclo}` | Sanctum | Get admitted student record |
-| `GET` | `/get-postulante-pago/{dni}/{proceso}` | Sanctum | Get applicant payment status |
+| `GET` | `/user` | Sanctum | Return the currently authenticated user object |
+| `GET` | `/get-ingresante/{dni}/{anio}/{ciclo}` | Sanctum | Get full admitted student record |
+| `GET` | `/get-postulante-pago/{dni}/{proceso}` | Sanctum | Get applicant record for payment verification |
 | `GET` | `/v1/get-postulante-inscrito/{dni}` | Sanctum | List processes an applicant is enrolled in |
-| `POST` | `/get-procesos` | Sanctum | List admission processes (paginated) |
+| `POST` | `/get-procesos` | Sanctum | List admission processes (paginated, with filters) |
+| `GET` | `/get-ingresante-pago/{dni}/{anio}/{ciclo}` | None | Get lightweight admitted student record by year and cycle |
+| `GET` | `/get-postulante-biometrico/{codigo}` | None | Get biometric control status by applicant code |
+| `GET` | `/verificar-ingreso/{periodo}/{dni}` | None | Verify admission status for a period |
+| `GET` | `/biometrico/seguimiento/{periodo}/{dni}` | None | Biometric tracking data for an admitted applicant |
 | `GET` | `/get-puntaje/{dni}` | None | Get applicant score record |
 | `GET` | `/v1/resultados_simulacro/{dni}` | None | Get simulacro exam results |
-| `GET` | `/verificar-ingreso/{periodo}/{dni}` | None | Verify admission status for a period |
-| `GET` | `/biometrico/seguimiento/{periodo}/{dni}` | None | Biometric tracking data |
-| `GET` | `/v1/observados-cepre/{dni}` | `cepre` | Get observed/flagged CEPRE applicant |
-| `POST` | `/v1/postulante-cepre-inscrito` | None (throttled 50/min) | Check CEPRE enrollment status |
+| `GET` | `/v1/get-foto-ingresante/{dni}` | None | Get admitted student photo as a Base64 string |
+| `GET` | `/v1/observados-cepre/{dni}` | `cepre` | Get observed/flagged CEPRE applicant data |
+| `POST` | `/v1/postulante-cepre-inscrito` | None (throttle: 50/min) | Check CEPRE enrollment status |
+| `GET` | `/get-procesos` | None | Get public admission process list (results page) |
+| `GET` | `/get-select-procesos` | None | Get active processes for dropdown/select UI |
 | `POST` | `/get-pagos-banco` | None | Get bank payment vouchers by DNI |
 | `POST` | `/get-pagos-banco-secuencia` | None | Get bank payment voucher by sequence number |
-| `POST` | `/cargar-imagen` | None | Upload biometric image (main campus) |
-| `POST` | `/cargar-imagen-cepre` | None | Upload biometric image (CEPRE) |
-| `POST` | `/cargar-imagen-juli` | None | Upload biometric image (Juli campus) |
-| `POST` | `/cargar-imagen-azangaro` | None | Upload biometric image (Azangaro campus) |
+| `GET` | `/get-pago-caja/{dni}` | None | Get treasury (caja) payment records by DNI |
+| `GET` | `/get-pago-caja/{dni}/{secuencia}` | None | Get a specific treasury payment by DNI and sequence |
+| `POST` | `/cargar-imagen` | None | Upload biometric image (main campus, process 9) |
+| `POST` | `/cargar-imagen-cepre` | None | Upload biometric image (CEPRE, process 10) |
+| `POST` | `/cargar-imagen-juli` | None | Upload biometric image (Juli campus, process 11) |
+| `POST` | `/cargar-imagen-azangaro` | None | Upload biometric image (Azangaro campus, process 12) |
 | `POST` | `/helper-photos` | None | Bulk biometric photo upload (Face + fingerprints) |
-| `GET` | `/get-postulante-biometrico/{codigo}` | None | Get biometric status by applicant code |
-| `GET` | `/get-select-procesos` | None | Get active processes for dropdown/select UI |
+| `GET` | `/get-avance-proceso-postulante/{proceso}/{dni}` | None | Get applicant progress within a process |
+| `GET` | `/carreras-previas/{dni}` | None | List previously enrolled programmes for a DNI |
+| `POST` | `/test-correo` | None | Trigger test email creation |
+| `POST` | `/actualizar-lista-reniec` | None | Trigger RENIEC list update |
+| `POST` | `/registro` | None | Register a new user account |
+| `POST` | `/login-app` | None | Log in via the legacy app login endpoint |
+| `POST` | `/recuperar-password` | None | Request a password recovery link |
+| `POST` | `/restablecer-password` | None | Reset password using a recovery token |
+| `GET` | `/auth/google` | None | Redirect to Google OAuth consent screen |
+| `GET` | `/auth/google/callback` | None | Handle Google OAuth callback and issue a token |
+| `POST` | `/app/registro` | None | Register a new mobile app user |
+| `POST` | `/app/login` | None | Log in from the mobile application |
+| `POST` | `/app/logout` | Sanctum | Log out from the mobile application |
+| `GET` | `/app/me` | Sanctum | Return the authenticated mobile user profile |
+| `GET` | `/app/validar-dni/{dni}` | Sanctum | Validate a DNI before registration |
+| `GET` | `/app/consultar-reniec/{dni}` | Sanctum | Look up personal data from RENIEC by DNI |
+| `POST` | `/app/registro-datos-personales` | Sanctum | Save applicant personal data (step 1) |
+| `POST` | `/app/validar-correo` | Sanctum | Validate email address uniqueness |
+| `POST` | `/app/validar-celular` | Sanctum | Validate phone number uniqueness |
+| `POST` | `/app/registro-datos-contacto` | Sanctum | Save applicant contact data (step 2) |
+| `GET` | `/app/ubigeo/departamentos` | Sanctum | List all departments (ubigeo) |
+| `GET` | `/app/ubigeo/provincias/{departamento}` | Sanctum | List provinces for a department |
+| `GET` | `/app/ubigeo/distritos/{departamento}/{provincia}` | Sanctum | List districts for a department and province |
+| `GET` | `/app/colegios/{ubigeo}` | Sanctum | List schools for a ubigeo code |
+| `POST` | `/app/registro-datos-colegio` | Sanctum | Save applicant school data (step 3) |
+| `GET` | `/app/consultar-apoderado-reniec/{dni}` | Sanctum | Look up guardian data from RENIEC |
+| `POST` | `/app/registro-datos-apoderado` | Sanctum | Save guardian data (step 4) |
+| `GET` | `/app/apoderados/{idPostulante}` | Sanctum | List guardians for an applicant |
+| `GET` | `/app/consultar-datos/{dni}` | Sanctum | Retrieve all registered applicant data |
+| `GET` | `/app/requisitos/get-by-modalidad/{id_modalidad}` | Sanctum | List required documents for an admission modality |
 
 ## Next Steps
 

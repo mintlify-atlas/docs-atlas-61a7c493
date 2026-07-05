@@ -1,7 +1,7 @@
 ---
-title: "End-to-End Admission Process Flow"
+title: "Admission Process Lifecycle in Sistema de Admisión Web"
 sidebarTitle: "Admission Process"
-description: "Follow the complete admissions lifecycle from process creation and applicant registration through document review, biometrics, exams, scoring, and final results publication."
+description: "Follow the full admissions lifecycle — process setup, applicant registration, document review, biometrics, scoring, and final results publication."
 ---
 
 The Sistema de Admisión Web models the full university admissions lifecycle as a series of connected stages, each handled by a dedicated module and user role. An *admission process* (`Proceso`) is the central record that ties everything together: it defines the academic year, the participating programs, their vacancies and modalities, the applicable fees, and the document requirements that applicants must satisfy. Every other entity in the system — pre-inscriptions, documents, scores, certificates — belongs to one process, and the active process for any session is tracked per-user through the `id_proceso` field and exposed to every Vue page via the `proceso_actual` shared Inertia prop.
@@ -76,7 +76,7 @@ The Sistema de Admisión Web models the full university admissions lifecycle as 
     - Uploads answer sheets and IDE files for automated scoring
     - Manages payment records for simulacro fees via `PagoSimulacroController`
 
-    Payment verification against the Banco de la Nación runs through `GET /get-pago-BN/{dni}` (`PagoBancoController@getPagosBN_OTI`). Admin payment oversight is available at `/admin/pagos-banco`. The system also integrates with an internal treasury service to cross-check cash payments (`/get-pago-caja/{dni}`).
+    Payment verification against the Banco de la Nación runs through `GET /get-pago-BN/{dni}` (`PagosController@getPagosBN_OTI`). Admin payment oversight is available at `/admin/pagos-banco`. The system also integrates with an internal treasury service to cross-check cash payments (`/get-pago-caja/{dni}`).
   </Step>
 
   <Step title="Scores recorded by the Calificador">
@@ -84,7 +84,7 @@ The Sistema de Admisión Web models the full university admissions lifecycle as 
 
     1. The Calificador loads their assigned exam area
     2. Scores (puntajes) are entered per applicant and program
-    3. The `PuntajeController` manages maximum score retrieval (`GET /get-puntajes-maximos-proceso/{proceso_slug}`)
+    3. The `PuntajeController` manages maximum score retrieval (`GET /get-puntajes-maximos-proceso/{p}`)
     4. Vocational test results are handled separately by `DetalleExamenVocacionalController`
 
     Admins can view ponderación (weighting) settings via `PonderacionController` and cross-check results before publication.

@@ -16,13 +16,16 @@ New applicants register through a five-step wizard that collects all the informa
 
     | Field | Rule |
     |---|---|
-    | `nro_doc` | Required, 8 digits for DNI |
+    | `nro_doc` | Required, 8 chars for DNI (`tipo_doc = 1`), 8–12 chars for other document types |
+    | `tipo_doc` | Optional integer (default 1 = DNI) |
     | `primer_apellido` | Required, max 100 chars |
+    | `segundo_apellido` | Optional, max 100 chars |
     | `nombres` | Required, max 200 chars |
     | `fec_nacimiento` | Required date |
     | `ubigeo_nacimiento` | Required, 6-char ubigeo code |
-    | `sexo` | Required (`1` = Masculine, `2` = Feminine) |
-    | `estado_civil` | Optional (mapped: 1 Soltero, 2 Casado, 3 Viudo, 4 Divorciado, 5 Conviviente) |
+    | `sexo` | Required, 1 char (`'1'` = Masculino, `'2'` = Femenino) |
+    | `estado_civil` | Optional string, max 20 chars (mapped internally to integer: 1 Soltero, 2 Casado, 3 Viudo, 4 Divorciado, 5 Conviviente) |
+    | `mayor_edad` | Required boolean |
 
     On save, the authenticated user's `dni` field is updated so that subsequent steps can resolve `getPostulante()` via `User.dni = Postulante.nro_doc`.
   </Step>
@@ -34,10 +37,11 @@ New applicants register through a five-step wizard that collects all the informa
 
     | Field | Rule |
     |---|---|
-    | `email` | Required, valid email, unique |
-    | `celular` | Required, min 9 digits, unique |
+    | `id_postulante` | Required, must exist in `postulante` table |
+    | `email` | Required, valid email |
+    | `celular` | Required, min 9 chars |
     | `direccion` | Required, max 255 chars |
-    | `ubigeo_residencia` | Required, 6-char ubigeo code |
+    | `ubigeo_residencia` | Required, max 6-char ubigeo code |
   </Step>
 
   <Step title="Paso 3 — School Information">
@@ -47,6 +51,7 @@ New applicants register through a five-step wizard that collects all the informa
 
     | Field | Rule |
     |---|---|
+    | `id_postulante` | Required, must exist in `postulante` table |
     | `id_colegio` | Required, must exist in `colegios` table |
     | `anio_egreso` | Optional, max 4 chars |
   </Step>
@@ -58,10 +63,13 @@ New applicants register through a five-step wizard that collects all the informa
 
     | Field | Rule |
     |---|---|
-    | `nro_documento` | Required, 8–12 chars |
-    | `paterno` | Required, max 100 chars |
-    | `nombres` | Required, max 200 chars |
-    | `tipo_apoderado` | Required, integer in `[1, 2, 3]` |
+    | `id_postulante` | Required, must exist in `postulante` table |
+    | `tiene_apoderado` | Required boolean |
+    | `apoderados.*.nro_documento` | Required when `apoderados` present, 8–12 chars |
+    | `apoderados.*.paterno` | Required when `apoderados` present, max 100 chars |
+    | `apoderados.*.materno` | Optional, max 100 chars |
+    | `apoderados.*.nombres` | Required when `apoderados` present, max 200 chars |
+    | `apoderados.*.tipo_apoderado` | Required when `apoderados` present, integer in `[1, 2, 3]` |
   </Step>
 
   <Step title="Paso 5 — Verification and Confirmation">
@@ -79,16 +87,20 @@ const searchDni = async () => {
   if (!form.nro_doc || form.nro_doc.length !== 8) return;
   searching.value = true;
   try {
-    const res = await axios.get(`/postulante/api/reniec/${form.nro_doc}`);
-    if (res.data.success && res.data.mayor_edad) {
+    const res = await axios.get(route('postulante.api.reniec', form.nro_doc));
+    if (res.data.success && res.data.datos) {
       const d = res.data.datos;
-      form.primer_apellido  = d.ap_paterno;
-      form.segundo_apellido = d.ap_materno;
-      form.nombres          = d.nombres;
-      form.fec_nacimiento   = d.fecha_nacimiento;
-      form.sexo             = d.sexo;
-      form.ubigeo_nacimiento = d.ubigeo_nacimiento;
+      form.primer_apellido  = d.ap_paterno || '';
+      form.segundo_apellido = d.ap_materno || '';
+      form.nombres          = d.nombres || '';
+      form.fec_nacimiento   = d.fecha_nacimiento || '';
+      form.sexo             = d.sexo || '';
+      form.estado_civil     = d.estado_civil || '';
+      form.ubigeo_nacimiento = d.ubigeo_nacimiento || '';
+      form.mayor_edad       = res.data.mayor_edad ?? true;
     }
+  } catch (e) {
+    // silent: form stays editable
   } finally {
     searching.value = false;
   }
@@ -160,7 +172,7 @@ The dashboard timeline maps registration steps (avance 1–5) plus document subm
 
 ## Resuming an Incomplete Registration
 
-The `misDatos` route checks the applicant's current `avance` and automatically redirects to the first incomplete step:
+The `misDatos` route checks the applicant's current `avance` and automatically redirects to the first incomplete step when `avance < 4`. Once avance reaches 4 (all four data steps saved), the read-only `MisDatos` view is rendered regardless of whether step 5 (confirmation) has been completed:
 
 ```
 GET /postulante/mis-datos
@@ -168,8 +180,8 @@ GET /postulante/mis-datos
   → avance 1: redirect to /postulante/paso-2
   → avance 2: redirect to /postulante/paso-3
   → avance 3: redirect to /postulante/paso-4
-  → avance 4: redirect to /postulante/paso-5
-  → avance ≥ 5: render MisDatos (read-only view)
+  → avance 4: render MisDatos (data complete, not yet confirmed)
+  → avance ≥ 5: render MisDatos (confirmed)
 ```
 
 ## Internal API Reference
@@ -185,7 +197,7 @@ GET /postulante/mis-datos
     Check whether a mobile number is already registered. Returns `{ existe: true|false }`.
   </Card>
   <Card title="GET /postulante/api/colegios/{ubigeo}" icon="school">
-    Retrieve the list of schools (`id`, `nombre`) for a given 6-digit ubigeo code.
+    Retrieve the list of schools (`value`, `label`) for a given 6-digit ubigeo code.
   </Card>
 </CardGroup>
 

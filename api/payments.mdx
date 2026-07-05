@@ -14,7 +14,7 @@ The payment endpoints expose records from the `banco_pagos` table, which stores 
 
 ## POST /api/get-pagos-banco
 
-Returns all bank payment vouchers associated with a given applicant DNI. The DNI is extracted from bytes 8–16 of the `num_doc` field in the payments table, which encodes additional bank metadata in the leading characters.
+Returns all bank payment vouchers associated with a given applicant DNI. The DNI is extracted from bytes 8–15 (positions 8 to 8+8) of the `num_doc` field in the payments table using `SUBSTRING(num_doc, 8, 8)`, which encodes additional bank metadata in the leading characters.
 
 **Authentication:** None.
 
@@ -69,10 +69,10 @@ curl -X POST https://your-domain.com/api/get-pagos-banco \
     Unique bank transaction sequence number.
   </ResponseField>
   <ResponseField name="dni" type="string">
-    Applicant DNI extracted from the bank document number.
+    Applicant DNI extracted from the bank document number field using `SUBSTRING(num_doc, 8, 8)`.
   </ResponseField>
   <ResponseField name="concepto" type="string">
-    Two-character payment concept code extracted from bytes 7–8 of the `concepto` field.
+    Two-character payment concept code extracted from the `concepto` field using `SUBSTRING(concepto, 7, 2)`.
   </ResponseField>
   <ResponseField name="imp_pag" type="string">
     Amount paid (as a decimal string).

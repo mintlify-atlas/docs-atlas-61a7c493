@@ -12,6 +12,59 @@ The biometric endpoints accept `multipart/form-data` file uploads from biometric
 
 ---
 
+## GET /api/get-postulante-biometrico/{codigo}
+
+Returns the biometric control status for an applicant identified by their DNI or admission code. The query filters against a fixed set of active process IDs.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="codigo" type="string" required>
+  The applicant's DNI. Matched against the `postulante.nro_doc` column in the `control_biometrico` join.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-postulante-biometrico/12345678
+```
+
+### Response — HTTP 200 (found)
+
+```json
+{
+  "status": true,
+  "data": {
+    "estado": 1
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="status" type="boolean">
+  `true` when a matching biometric record was found.
+</ResponseField>
+<ResponseField name="data.estado" type="integer">
+  Biometric record status flag from the `control_biometrico` table. Interpretation depends on the admission stage workflow.
+</ResponseField>
+
+### Response — HTTP 203 (not found)
+
+```json
+{
+  "status": false,
+  "mensaje": "Postulante no encontrado"
+}
+```
+
+<Tip>
+  Query this endpoint at the biometric station before capturing images to confirm the applicant's record exists in the system and to check their current control status before proceeding with the capture workflow.
+</Tip>
+
+---
+
 ## POST /api/cargar-imagen
 
 Uploads a single biometric image (fingerprint or photo) for the **main campus** (process directory `9`). The file is stored at `public/documentos/9/{etapa}/huellas/{dni}` on the server.
@@ -69,6 +122,22 @@ Identical behaviour to `/api/cargar-imagen` but stores files under process direc
 
 **Authentication:** None.
 
+### Request
+
+Content-Type: `multipart/form-data`
+
+<ParamField body="imagen" type="file" required>
+  The biometric image file to upload.
+</ParamField>
+
+<ParamField body="dni" type="string" required>
+  The applicant's DNI. Used as the filename for the stored image.
+</ParamField>
+
+<ParamField body="etapa" type="string" required>
+  Use `"inscripcion"` to save under `inscripciones/huellas/`; any other value saves under `control_biometrico/huellas/`.
+</ParamField>
+
 ### Example Request
 
 ```bash
@@ -84,9 +153,25 @@ Files are saved to `public/documentos/10/control_biometrico/huellas/12345678`.
 
 ## POST /api/cargar-imagen-juli
 
-Stores biometric images under process directory `11` (Juli campus).
+Stores biometric images under process directory `11` (Juli campus). Accepts the same fields as `/api/cargar-imagen`.
 
 **Authentication:** None.
+
+### Request
+
+Content-Type: `multipart/form-data`
+
+<ParamField body="imagen" type="file" required>
+  The biometric image file to upload.
+</ParamField>
+
+<ParamField body="dni" type="string" required>
+  The applicant's DNI. Used as the filename for the stored image.
+</ParamField>
+
+<ParamField body="etapa" type="string" required>
+  Use `"inscripcion"` to save under `inscripciones/huellas/`; any other value saves under `control_biometrico/huellas/`.
+</ParamField>
 
 ### Example Request
 
@@ -103,9 +188,25 @@ Files are saved to `public/documentos/11/inscripciones/huellas/12345678`.
 
 ## POST /api/cargar-imagen-azangaro
 
-Stores biometric images under process directory `12` (Azangaro campus).
+Stores biometric images under process directory `12` (Azangaro campus). Accepts the same fields as `/api/cargar-imagen`.
 
 **Authentication:** None.
+
+### Request
+
+Content-Type: `multipart/form-data`
+
+<ParamField body="imagen" type="file" required>
+  The biometric image file to upload.
+</ParamField>
+
+<ParamField body="dni" type="string" required>
+  The applicant's DNI. Used as the filename for the stored image.
+</ParamField>
+
+<ParamField body="etapa" type="string" required>
+  Use `"inscripcion"` to save under `inscripciones/huellas/`; any other value saves under `control_biometrico/huellas/`.
+</ParamField>
 
 ### Example Request
 
@@ -122,7 +223,7 @@ Files are saved to `public/documentos/12/control_biometrico/huellas/12345678`.
 
 ## POST /api/helper-photos
 
-Bulk upload endpoint that accepts a facial photo together with left-hand and right-hand fingerprint images in a single request. Files are organised into separate `fotos/` and `huellas/` subdirectories. This endpoint also updates the applicant's progress record (`avance_postulante`) — setting `avance = 2` for the `inscripcion` stage and `avance = 5` for the biometric control stage.
+Bulk upload endpoint that accepts a facial photo together with left-hand and right-hand fingerprint images in a single request. Files are organised into separate `fotos/` and `huellas/` subdirectories under `public/documentos/{id_proceso}/{etapa}/`. This endpoint also updates the applicant's progress record (`avance_postulante`) — setting `avance = 2` for the `inscripcion` stage and `avance = 5` for any other stage.
 
 **Authentication:** None.
 
@@ -151,7 +252,7 @@ Content-Type: `multipart/form-data`
 </ParamField>
 
 <ParamField body="etapa" type="string" required>
-  Stage identifier. Use `"inscripcion"` or `"control_biometrico"`. The value is lower-cased before use.
+  Stage identifier (e.g., `"inscripcion"` or `"control_biometrico"`). The value is lower-cased before use and becomes a path segment in the storage directory.
 </ParamField>
 
 ### Example Request
@@ -195,51 +296,3 @@ curl -X POST https://your-domain.com/api/helper-photos \
   "error": "No se proporcionaron todos los archivos requeridos (Face, LFinger, RFinger)"
 }
 ```
-
----
-
-## GET /api/get-postulante-biometrico/{codigo}
-
-Returns the biometric control status for an applicant identified by their code (DNI or `codigo_ingreso`). The query filters against a fixed set of active process IDs.
-
-**Authentication:** None.
-
-### Path Parameters
-
-<ParamField path="codigo" type="string" required>
-  The applicant's DNI or admission code (`codigo_ingreso`).
-</ParamField>
-
-### Example Request
-
-```bash
-curl https://your-domain.com/api/get-postulante-biometrico/12345678
-```
-
-### Response — HTTP 200 (found)
-
-```json
-{
-  "status": true,
-  "data": {
-    "estado": 1
-  }
-}
-```
-
-<ResponseField name="data.estado" type="integer">
-  Biometric record status flag from the `control_biometrico` table. Interpretation depends on the admission stage workflow.
-</ResponseField>
-
-### Response — HTTP 203 (not found)
-
-```json
-{
-  "status": false,
-  "mensaje": "Postulante no encontrado"
-}
-```
-
-<Tip>
-  Use `GET /api/get-postulante-biometrico/{codigo}` at the biometric station before capturing images to confirm the applicant's record exists in the system and determine their current control status before proceeding with the capture workflow.
-</Tip>

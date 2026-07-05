@@ -162,7 +162,7 @@ Both routes are authenticated and generate a signed document confirming the appl
 
 ## Process and Year Navigation
 
-Processes on the results page are grouped by year for easy navigation. The controller passes `procesos` to the Vue page as an array grouped by `anio`:
+Processes on the results page are grouped by year for easy navigation. The controller passes `procesos` to the Vue page as an array grouped by `anio`. Only processes with `estado = 1` are included in the applicant-facing view:
 
 ```json
 [
@@ -179,8 +179,6 @@ Processes on the results page are grouped by year for easy navigation. The contr
   }
 ]
 ```
-
-Only processes with `estado = 1` and `nivel = 1` are included in the applicant-facing view.
 
 <Note>
   Results for a given admission process are only visible once the process administrator explicitly publishes them. If you participated in a process and do not yet see your results under _Mi Rendimiento_, it means the administrator has not yet released the results for that cycle. Check back after the official results announcement date published by the admissions office.

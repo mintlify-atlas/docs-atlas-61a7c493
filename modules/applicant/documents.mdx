@@ -24,6 +24,8 @@ When the applicant loads `GET /postulante/mis-requisitos`, the controller resolv
     "total_requisitos": 8,
     "completados": 3,
     "tiene_revision_activa": false,
+    "con_programas": true,
+    "id_programa_postulante": 7,
     "requisitos": [
       {
         "id": 1,
@@ -48,9 +50,9 @@ All document uploads are sent as `multipart/form-data` to `POST /postulante/subi
 | Constraint | Value |
 |---|---|
 | Accepted formats (upload) | PDF only (`mimes:pdf`) |
-| Accepted formats (update) | PDF, JPG, JPEG, PNG |
-| Maximum file size | 20 MB |
-| Maximum documents per requirement | 10 (across all accepted types) |
+| Accepted formats (update) | PDF, JPG, JPEG, PNG (`mimes:pdf,jpg,jpeg,png`) |
+| Maximum file size | 20 MB (`max:20480`) |
+| Maximum documents per requirement | 10 (across all accepted types for the same requirement) |
 
 ```javascript
 // Upload a document via axios
@@ -143,10 +145,10 @@ await axios.post('/postulante/fcm-token', {
 });
 ```
 
-To remove a token (e.g., on logout):
+To remove a token (e.g., on logout), use the root-level DELETE endpoint (not the postulante-prefixed one):
 
 ```javascript
-await axios.delete('/postulante/fcm-token', {
+await axios.delete('/fcm-token', {
   data: { token: fcmToken },
 });
 ```

@@ -1,7 +1,7 @@
 ---
-title: "User Roles and Access Control in Admisión Web"
+title: "User Roles and Access Control in Sistema de Admisión"
 sidebarTitle: "Roles & Permissions"
-description: "Six built-in roles control access across Admisión Web — Admin, Revisor, Postulante, Segundas, Simulacro, and Calificador. Each has dedicated middleware and route prefixes."
+description: "Six built-in roles control access in Admisión Web: Admin, Revisor, Segundas, Simulacro, Calificador, and Postulante, each with its own middleware."
 ---
 
 Admisión Web uses a **dual-layer access control system**. The primary layer is a custom `id_rol` integer field on every `users` record — each middleware class reads this value directly and short-circuits unauthorized requests with an HTTP 403. The secondary layer is the **Spatie Laravel Permission** package (`spatie/laravel-permission ^6.0`), which provides a fine-grained RBAC model (`rbac_role_permissions`, `rbac_user_permissions`) for per-view, per-action permission codes. The two systems coexist: most route groups are still guarded by the `id_rol` middleware, while the Revisor module has already started migrating individual routes to `rbac:revisor.access`-style guards.
@@ -231,7 +231,7 @@ After a successful credential check in `AuthenticatedSessionController@store`, t
 | 7 | Calificador | `/calificacion` |
 | 8 | Postulante | `/postulante/dashboard?seleccionar_proceso=1` |
 
-The `RedireccionarARol` middleware applies the same logic to prevent authenticated users from visiting the login page — if they are already signed in, they are bounced to their dashboard immediately.
+The `RedireccionarARol` middleware (registered as the `redirect` alias in `Kernel.php`) applies the same role-routing logic on the root `/` route — authenticated users who visit `/` are immediately bounced to their role's dashboard.
 
 <Warning>
   Inactive users (`estado != 1`) are rejected at login time regardless of role. `AuthenticatedSessionController` logs them out and returns an error before any redirect happens.
