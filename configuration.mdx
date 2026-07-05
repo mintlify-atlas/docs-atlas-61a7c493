@@ -1,0 +1,247 @@
+---
+title: "Configure Sistema de Admisión Web Environment"
+sidebarTitle: "Configuration"
+description: "Reference for all environment variables in .env.example — database, cache, mail, Firebase, payment, and external API settings."
+---
+
+All runtime configuration for Sistema de Admisión Web is managed through a single `.env` file in the project root. Laravel reads these values at boot time and exposes them to the application via the `env()` helper and the `/config` directory. No sensitive credentials are ever hard-coded in source files — every integration key, database password, and service URL belongs in `.env` and nowhere else.
+
+<Warning>
+  **Never commit your `.env` file to version control.** It is already listed in `.gitignore`. Committing it would expose database credentials, API keys, and the application encryption key to anyone with repository access. Use `.env.example` (which contains only safe placeholder values) as the committed reference.
+</Warning>
+
+<Tip>
+  After copying `.env.example` to `.env`, always run `php artisan key:generate` before starting the application. This command fills `APP_KEY` with a securely generated 32-byte base64 string that Laravel uses for encrypting cookies, sessions, and other payloads. Starting the app without a key will cause a runtime exception.
+</Tip>
+
+---
+
+## Application Settings
+
+These variables control the core Laravel application identity, runtime mode, and public URL.
+
+<ParamField body="APP_NAME" type="string" default="Laravel">
+  The human-readable name of the application. Used in email templates, the browser title bar, and anywhere the application identifies itself. Set this to something like `"Admisión Web - UNAP"` for your institution.
+</ParamField>
+
+<ParamField body="APP_ENV" type="string" default="local">
+  The environment the application is running in. Accepted values are `local`, `staging`, and `production`. Laravel uses this to toggle features such as detailed error pages (enabled in `local`, disabled in `production`).
+</ParamField>
+
+<ParamField body="APP_KEY" type="string" default="">
+  The application encryption key. **Must not be empty.** Generate it with `php artisan key:generate`. The value is a base64-encoded 32-byte random string prefixed with `base64:`.
+</ParamField>
+
+<ParamField body="APP_DEBUG" type="boolean" default="true">
+  When `true`, full stack traces and debug information are displayed on error pages. Set to `false` in production environments to avoid leaking implementation details to end users.
+</ParamField>
+
+<ParamField body="APP_URL" type="string" default="http://localhost">
+  The fully qualified public URL of the application, including the scheme. Used by Laravel to generate absolute URLs (e.g., in emails and signed routes). Example: `https://admision.unap.edu.pe`.
+</ParamField>
+
+---
+
+## Database
+
+Sistema de Admisión Web uses MySQL as its primary datastore. All Eloquent models, migrations, and raw queries target the connection defined here.
+
+<ParamField body="DB_CONNECTION" type="string" default="mysql">
+  The database driver. The platform is built and tested against `mysql`. Changing this to another driver (e.g., `pgsql`) would require reviewing raw SQL in controllers and migrations.
+</ParamField>
+
+<ParamField body="DB_HOST" type="string" default="127.0.0.1">
+  Hostname or IP address of the MySQL server. Use `127.0.0.1` for a local instance or the internal hostname of your managed database service.
+</ParamField>
+
+<ParamField body="DB_PORT" type="integer" default="3306">
+  TCP port on which the MySQL server is listening. The default MySQL port is `3306`.
+</ParamField>
+
+<ParamField body="DB_DATABASE" type="string" default="laravel">
+  Name of the MySQL database to connect to. Create this database before running `php artisan migrate`. Example: `admision_web`.
+</ParamField>
+
+<ParamField body="DB_USERNAME" type="string" default="root">
+  MySQL username with `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, and `INDEX` privileges on `DB_DATABASE`.
+</ParamField>
+
+<ParamField body="DB_PASSWORD" type="string" default="">
+  Password for `DB_USERNAME`. Leave empty only if the MySQL user has no password (common in local Docker setups).
+</ParamField>
+
+---
+
+## Cache, Queue & Session
+
+These variables control where Laravel stores cached data, how background jobs are dispatched, and how user sessions are persisted.
+
+<ParamField body="CACHE_DRIVER" type="string" default="file">
+  The cache backend. `file` stores cache entries in `storage/framework/cache`. Switch to `redis` for distributed caching across multiple app servers.
+</ParamField>
+
+<ParamField body="QUEUE_CONNECTION" type="string" default="database">
+  Where queued jobs are stored. `database` uses the `jobs` table (created by `php artisan migrate`). Switch to `redis` for higher throughput in production.
+</ParamField>
+
+<ParamField body="SESSION_DRIVER" type="string" default="file">
+  How user sessions are stored. `file` stores sessions in `storage/framework/sessions`. Use `redis` or `database` for multi-server deployments where sticky sessions are not available.
+</ParamField>
+
+<ParamField body="SESSION_LIFETIME" type="integer" default="120">
+  Number of minutes before an idle session expires. After this period, unauthenticated users are redirected to the login page.
+</ParamField>
+
+---
+
+## Redis
+
+Redis is used as a drop-in backend for cache, queue, and session storage when `CACHE_DRIVER`, `QUEUE_CONNECTION`, or `SESSION_DRIVER` are set to `redis`. The `predis/predis ^3.4` package handles the connection.
+
+<ParamField body="REDIS_HOST" type="string" default="127.0.0.1">
+  Hostname or IP address of the Redis server.
+</ParamField>
+
+<ParamField body="REDIS_PASSWORD" type="string" default="null">
+  Redis authentication password. Set to `null` (the literal string) if your Redis instance does not require a password — this is the Laravel convention for "no password".
+</ParamField>
+
+<ParamField body="REDIS_PORT" type="integer" default="6379">
+  TCP port on which Redis is listening. The default Redis port is `6379`.
+</ParamField>
+
+---
+
+## Mail
+
+The mail settings configure outbound email delivery for notifications, password resets, and applicant communications. During local development the defaults point to Mailpit (the Laravel Sail mail catcher) on port `1025`.
+
+<ParamField body="MAIL_MAILER" type="string" default="smtp">
+  The mail transport driver. Common values: `smtp`, `sendmail`, `mailgun`, `ses`, `postmark`, `log` (discards all mail, useful in testing).
+</ParamField>
+
+<ParamField body="MAIL_HOST" type="string" default="mailpit">
+  SMTP server hostname. In production, replace `mailpit` with your SMTP provider's host (e.g., `smtp.gmail.com`, `smtp.mailgun.org`).
+</ParamField>
+
+<ParamField body="MAIL_PORT" type="integer" default="1025">
+  SMTP port. Common values: `25` (unauthenticated), `465` (SSL), `587` (STARTTLS), `1025` (Mailpit local catcher).
+</ParamField>
+
+<ParamField body="MAIL_USERNAME" type="string" default="null">
+  SMTP authentication username. Set to `null` if the SMTP server does not require authentication (e.g., Mailpit).
+</ParamField>
+
+<ParamField body="MAIL_PASSWORD" type="string" default="null">
+  SMTP authentication password. Set to `null` if unused.
+</ParamField>
+
+<ParamField body="MAIL_ENCRYPTION" type="string" default="null">
+  Transport encryption. Use `tls` for port `587` (STARTTLS) or `ssl` for port `465`. Set to `null` for unencrypted connections.
+</ParamField>
+
+<ParamField body="MAIL_FROM_ADDRESS" type="string" default="hello@example.com">
+  The `From:` email address for all outbound mail. Set this to a real, deliverable address at your institution (e.g., `noreply@admision.unap.edu.pe`).
+</ParamField>
+
+<ParamField body="MAIL_FROM_NAME" type="string" default="${APP_NAME}">
+  The `From:` display name. Defaults to the value of `APP_NAME`. Shown as the sender name in email clients.
+</ParamField>
+
+---
+
+## Firebase
+
+Firebase is used for Cloud Messaging (FCM) push notifications delivered to applicants when their document review status changes. The `kreait/firebase-php ^7.24` SDK on the backend reads these variables via `config/firebase.php`.
+
+<ParamField body="FIREBASE_PROJECT_ID" type="string" default="app-admision-2026">
+  The Firebase project identifier. Found in the Firebase Console under **Project Settings → General → Project ID**.
+</ParamField>
+
+<ParamField body="FIREBASE_CREDENTIALS_PATH" type="string" default="${APP_STORAGE}/app/firebase-credentials.json">
+  Absolute path to the Firebase service-account JSON credentials file. Download this file from **Firebase Console → Project Settings → Service Accounts → Generate new private key** and place it at `storage/app/firebase-credentials.json`.
+</ParamField>
+
+<ParamField body="FIREBASE_MESSAGING_SENDER_ID" type="string" default="116539912844415710654">
+  The Firebase Cloud Messaging sender ID. Used by the client-side Firebase SDK to associate push subscriptions with your project.
+</ParamField>
+
+<ParamField body="FIREBASE_API_KEY" type="string" default="">
+  The Firebase Web API Key. Found in **Firebase Console → Project Settings → General → Web API Key**. Used by the frontend Firebase SDK for initialisation.
+</ParamField>
+
+<ParamField body="FIREBASE_APP_ID" type="string" default="">
+  The Firebase App ID for the registered web application. Found in **Firebase Console → Project Settings → Your apps → App ID**.
+</ParamField>
+
+<ParamField body="FIREBASE_AUTH_DOMAIN" type="string" default="app-admision-2026.firebaseapp.com">
+  The Firebase Authentication domain. Used by the Firebase client SDK for OAuth redirects.
+</ParamField>
+
+<ParamField body="FIREBASE_STORAGE_BUCKET" type="string" default="app-admision-2026.firebasestorage.app">
+  The Firebase Cloud Storage bucket name. Used if Firebase Storage is enabled for the project.
+</ParamField>
+
+<ParamField body="FIREBASE_VAPID_KEY" type="string" default="">
+  The VAPID public key for Web Push. Generated in **Firebase Console → Project Settings → Cloud Messaging → Web Push certificates**. Required for FCM to deliver push notifications to browser clients.
+</ParamField>
+
+---
+
+## Broadcasting
+
+Broadcasting powers real-time frontend updates. The `BROADCAST_DRIVER` and Pusher variables are used when live event broadcasting is enabled.
+
+<ParamField body="BROADCAST_DRIVER" type="string" default="log">
+  The broadcasting backend. `log` writes events to the log file (no real-time delivery). Set to `pusher` to enable real-time WebSocket broadcasting via Pusher or a Pusher-compatible server like Soketi.
+</ParamField>
+
+<ParamField body="PUSHER_APP_ID" type="string" default="">
+  The Pusher application ID. Provided by Pusher (or your Soketi configuration).
+</ParamField>
+
+<ParamField body="PUSHER_APP_KEY" type="string" default="">
+  The Pusher application key. Also surfaced to the frontend as `VITE_PUSHER_APP_KEY`.
+</ParamField>
+
+<ParamField body="PUSHER_APP_SECRET" type="string" default="">
+  The Pusher application secret. Used by the server to sign channel authentication responses. Keep this value private.
+</ParamField>
+
+<ParamField body="PUSHER_HOST" type="string" default="">
+  The WebSocket server hostname. Leave empty to use Pusher's hosted infrastructure. Set to your Soketi server hostname for self-hosted deployments. Also surfaced as `VITE_PUSHER_HOST`.
+</ParamField>
+
+<ParamField body="PUSHER_PORT" type="integer" default="443">
+  The WebSocket server port. `443` is standard for TLS WebSocket connections. Also surfaced as `VITE_PUSHER_PORT`.
+</ParamField>
+
+<ParamField body="PUSHER_SCHEME" type="string" default="https">
+  The connection scheme (`https` or `http`). Use `https` in production. Also surfaced as `VITE_PUSHER_SCHEME`.
+</ParamField>
+
+<ParamField body="PUSHER_APP_CLUSTER" type="string" default="mt1">
+  The Pusher cluster region (e.g., `mt1`, `us2`, `eu`). Ignored when using a self-hosted Soketi server. Also surfaced as `VITE_PUSHER_APP_CLUSTER`.
+</ParamField>
+
+---
+
+## AWS (S3 / SES)
+
+These variables enable AWS S3 file storage and/or Amazon SES as the mail transport. They are also read by `config/services.php` for the `ses` driver.
+
+<ParamField body="AWS_ACCESS_KEY_ID" type="string" default="">
+  AWS IAM access key ID. The IAM user or role must have `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` permissions on `AWS_BUCKET`, and `ses:SendEmail` if using SES.
+</ParamField>
+
+<ParamField body="AWS_SECRET_ACCESS_KEY" type="string" default="">
+  The secret key corresponding to `AWS_ACCESS_KEY_ID`. Treat this value with the same care as a database password.
+</ParamField>
+
+<ParamField body="AWS_DEFAULT_REGION" type="string" default="us-east-1">
+  The AWS region where your S3 bucket and/or SES sending identity are configured (e.g., `us-east-1`, `sa-east-1`).
+</ParamField>
+
+<ParamField body="AWS_BUCKET" type="string" default="">
+  The S3 bucket name used for file storage when `FILESYSTEM_DISK=s3`. Leave empty if using local or other storage drivers.
+</ParamField>

@@ -1,0 +1,259 @@
+---
+title: "User Roles and Access Control in Admisión Web"
+sidebarTitle: "Roles & Permissions"
+description: "Six built-in roles control access across Admisión Web — Admin, Revisor, Postulante, Segundas, Simulacro, and Calificador. Each has dedicated middleware and route prefixes."
+---
+
+Admisión Web uses a **dual-layer access control system**. The primary layer is a custom `id_rol` integer field on every `users` record — each middleware class reads this value directly and short-circuits unauthorized requests with an HTTP 403. The secondary layer is the **Spatie Laravel Permission** package (`spatie/laravel-permission ^6.0`), which provides a fine-grained RBAC model (`rbac_role_permissions`, `rbac_user_permissions`) for per-view, per-action permission codes. The two systems coexist: most route groups are still guarded by the `id_rol` middleware, while the Revisor module has already started migrating individual routes to `rbac:revisor.access`-style guards.
+
+## Role Reference Table
+
+| `id_rol` | Role name | Route prefix | Middleware class | Primary area |
+|---|---|---|---|---|
+| 1 | **Admin** | `/admin` | `Admin.php` | Full administrative panel |
+| 2 | **Revisor** | `/revisor` | `Revisor.php` | Document review and approval |
+| 3 | **Segundas** | `/segundas` | `Segundas.php` | Segundas (second) admissions management |
+| 6 | **Simulacro** | `/simulacro` | `Simulacro.php` | Exam simulation management |
+| 7 | **Calificador** | `/calificacion` | `Calificador.php` | Score entry and results management |
+| 8 | **Postulante** | `/postulante` | *(none — auth only)* | Self-registration and document submission |
+
+<Note>
+  Roles 4 and 5 exist in the database schema but currently have no dedicated middleware or route group. They are reserved for future modules.
+</Note>
+
+---
+
+## Admin (id\_rol = 1)
+
+Admins have unrestricted access to the entire `/admin/*` route tree. The `Admin` middleware verifies `id_rol == 1` and aborts with 403 otherwise:
+
+```php
+// app/Http/Middleware/Admin.php
+public function handle(Request $request, Closure $next)
+{
+    if (!auth()->check()) {
+        return redirect('/login');
+    }
+
+    if (auth()->user()->id_rol == 1) {
+        return $next($request);
+    }
+
+    abort(403, 'No tienes permisos de administrador');
+}
+```
+
+**Admin capabilities include:**
+
+- Full CRUD for users, roles, and permissions (`/admin/usuarios`, `/admin/roles`, `/admin/permisos`)
+- Admission process management: create, configure, and delete processes (`/admin/procesos`)
+- Program, modality, vacancy, and fee (tarifa) configuration
+- Document requirement definitions (`/admin/requisitos`, `/admin/tipos-documento`)
+- Inscription and pre-inscription oversight (`/admin/inscripciones`, `/admin/preinscripciones`)
+- RENIEC identity lookup (`/admin/consulta-reniec`)
+- Biometric control and photo management (`/admin/control-biometrico`)
+- Score results document uploads (`/save-documento-resultado`)
+- Certificate and digital signature management (`/admin/certificados-firma`)
+- Audit trail / trazabilidad (`/admin/trazabilidad`)
+- Database backup and restore (`/admin/respaldo-bd`)
+- SMTP account configuration (`/admin/smtp-accounts`)
+- RBAC module and permission management (`/admin/modulos`, `/admin/permisos`)
+
+---
+
+## Revisor (id\_rol = 2)
+
+Revisores review and approve or reject documents submitted by applicants. The `Revisor` middleware checks the RBAC permission `revisor.access` rather than `id_rol` directly — making it the most RBAC-migrated role in the system:
+
+```php
+// app/Http/Middleware/Revisor.php
+public function handle(Request $request, Closure $next)
+{
+    if (!auth()->check()) {
+        return redirect('/login');
+    }
+
+    $user = auth()->user();
+
+    // RBAC: verificar permiso revisor.access
+    if ($user->hasPermission('revisor.access')) {
+        return $next($request);
+    }
+
+    abort(403, 'No tienes permisos de revisor');
+}
+```
+
+**Revisor capabilities include:**
+
+- Document queue management: view pending review requests, approve or reject with comments
+- Biometric PDF download: `GET /pdf-datos-biometrico/{dni}` (protected by `revisor` middleware)
+- Personal activity dashboard (`/revisor/mi-actividad`) — workload summaries, timelines, rankings
+- Real-time push notifications via FCM for new review requests
+- Unread notification count injected automatically into every Inertia response (`notificacionesNoLeidas` shared prop)
+- Reviewer alias creation in `revisor_aliases` for audit trail attribution
+
+<Tip>
+  The `HandleInertiaRequests` middleware checks `id_rol == 2` to inject `notificacionesNoLeidas` as a shared prop. Even if a user is granted `revisor.access` via RBAC without having `id_rol == 2`, they will not receive the live unread count unless that condition is also updated.
+</Tip>
+
+---
+
+## Segundas (id\_rol = 3)
+
+The Segundas role manages the *segundas especialidades* (second specialisation) admissions track, which runs as a fully parallel process under `/segundas/*`:
+
+```php
+// app/Http/Middleware/Segundas.php
+public function handle(Request $request, Closure $next): Response
+{
+    if (auth()->user()->id_rol == 3) {
+        return $next($request);
+    } else {
+        return redirect("/segundas");
+    }
+}
+```
+
+**Segundas capabilities include:**
+
+- Pre-inscription management for segundas candidates
+- Vacancy and modality configuration specific to the segundas track
+- Observed/sanctioned applicant management
+- Identity verification within the segundas flow
+- Results summary generation
+
+---
+
+## Simulacro (id\_rol = 6)
+
+The Simulacro role manages practice exam sessions before the official admission exam:
+
+```php
+// app/Http/Middleware/Simulacro.php
+public function handle(Request $request, Closure $next): Response
+{
+    if (auth()->user()->id_rol == 6) {
+        return $next($request);
+    } else {
+        return redirect("/");
+    }
+}
+```
+
+**Simulacro capabilities include:**
+
+- Creating and managing exam simulacro records
+- Registering participants and uploading answer sheets
+- Photo verification of participants (`GET /verificacion-fotos` — dual-guarded by `auth` and `simulacro`)
+- Viewing individual exam detail pages
+
+---
+
+## Calificador (id\_rol = 7)
+
+Calificadores enter scores after the exam is held:
+
+```php
+// app/Http/Middleware/Calificador.php
+public function handle(Request $request, Closure $next): Response
+{
+    if (auth()->user()->id_rol == 7) {
+        return $next($request);
+    } else {
+        return redirect("/");
+    }
+}
+```
+
+**Calificador capabilities include:**
+
+- Score entry for each applicant and program (`/calificacion/*`)
+- Viewing exam results and vocational test details
+- Score management and puntaje oversight
+
+---
+
+## Postulante (id\_rol = 8)
+
+Postulantes are applicants. They register themselves and interact with the system through the `/postulante/*` route group, which is protected by the standard `auth` middleware only — no role-specific middleware is applied.
+
+**Postulante capabilities include:**
+
+- 5-step self-registration wizard (`/postulante/paso-1` through `/postulante/paso-5`)
+- Document upload and re-submission (`/postulante/documentos`)
+- Review status tracking (`/postulante/seguimiento`)
+- Personal results view (`/postulante/mis-resultados`)
+- Notification inbox (`/postulante/notificaciones`)
+- Profile management (password change, photo upload, digital certificate)
+
+<Note>
+  Users who authenticate via Google OAuth are automatically assigned `id_rol = 8` (Postulante) if they do not already have an account. The `User::updateOrCreateFromGoogle()` method links an existing account by email if one is found, preserving the user's existing role. Truly new Google sign-ins default to Postulante.
+</Note>
+
+---
+
+## User Model Helper Methods
+
+The `App\Models\User` model exposes three convenience methods for role checks in application code and policies:
+
+```php
+$user->isAdmin();        // returns true if $user->id_rol == 1
+$user->isRevisor();      // returns true if $user->id_rol == 2
+$user->hasRolId($id);    // returns true if $user->id_rol == $id (any role)
+```
+
+For the RBAC layer, two additional methods resolve the full permission code set for the user, combining role-level grants with per-user overrides:
+
+```php
+// Returns a Collection of strings like "documento.upload", "revisor.access"
+$user->getAllPermissions();
+
+// Check a single permission code
+$user->hasPermission('revisor.access');   // bool
+
+// Check if any of an array of codes is granted
+$user->hasAnyPermission(['documento.upload', 'documento.review']);  // bool
+```
+
+---
+
+## Login Redirect Flow
+
+After a successful credential check in `AuthenticatedSessionController@store`, the user is redirected to their role's home page:
+
+| `id_rol` | Role | Redirect destination |
+|---|---|---|
+| 1 | Admin | `/admin/dashboard` |
+| 2 | Revisor | `/revisor` |
+| 3 | Segundas | `/segundas` |
+| 6 | Simulacro | `/simulacro` |
+| 7 | Calificador | `/calificacion` |
+| 8 | Postulante | `/postulante/dashboard?seleccionar_proceso=1` |
+
+The `RedireccionarARol` middleware applies the same logic to prevent authenticated users from visiting the login page — if they are already signed in, they are bounced to their dashboard immediately.
+
+<Warning>
+  Inactive users (`estado != 1`) are rejected at login time regardless of role. `AuthenticatedSessionController` logs them out and returns an error before any redirect happens.
+</Warning>
+
+---
+
+## Spatie Laravel Permission Codes
+
+The Spatie permission table currently defines the following named permissions for use with `can()` gates and Blade directives:
+
+| Permission key | Description |
+|---|---|
+| `ver-rol` | View role list |
+| `crear-rol` | Create new roles |
+| `editar-rol` | Edit existing roles |
+| `borrar-rol` | Delete roles |
+| `ver-blog` | View blog posts |
+| `crear-blog` | Create blog posts |
+| `editar-blog` | Edit blog posts |
+| `borrar-blog` | Delete blog posts |
+
+<Note>
+  The Spatie permission system is partially implemented. Current production access control is primarily enforced through the `id_rol` middleware chain. The RBAC system (stored in `rbac_role_permissions` and `rbac_user_permissions`) is a parallel, more granular layer that is being progressively rolled out, starting with the Revisor module.
+</Note>

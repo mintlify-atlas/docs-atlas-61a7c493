@@ -1,0 +1,167 @@
+---
+title: "REST API Endpoints for Bank Payment Verification"
+sidebarTitle: "Payments"
+description: "Verify applicant fee payments by DNI or bank sequence number using POST /api/get-pagos-banco and POST /api/get-pagos-banco-secuencia."
+---
+
+The payment endpoints expose records from the `banco_pagos` table, which stores payment vouchers received from the university's banking integration. You can query all payments associated with a given DNI or look up a specific payment by its bank sequence number. Both endpoints are public and require no authentication.
+
+<Note>
+  Payment data originates from an external bank API integration and is stored locally in the `banco_pagos` table. Only payments recorded after **January 1, 2025** are returned. Earlier records are excluded by a hard-coded date filter applied at query time.
+</Note>
+
+---
+
+## POST /api/get-pagos-banco
+
+Returns all bank payment vouchers associated with a given applicant DNI. The DNI is extracted from bytes 8–16 of the `num_doc` field in the payments table, which encodes additional bank metadata in the leading characters.
+
+**Authentication:** None.
+
+### Request Body
+
+<ParamField body="dni" type="string" required>
+  The applicant's 8-digit DNI number. The query matches against `SUBSTRING(num_doc, 8, 8)`.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST https://your-domain.com/api/get-pagos-banco \
+  -H "Content-Type: application/json" \
+  -d '{"dni": "12345678"}'
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "estado": true,
+  "datos": [
+    {
+      "secuencia": "000987654",
+      "dni": "12345678",
+      "concepto": "01",
+      "imp_pag": "150.00",
+      "fch_pag": "2025-02-20",
+      "nom_cli": "JUAN QUISPE MAMANI",
+      "estado": 0,
+      "fecha_usado": null,
+      "id_usuario": null,
+      "id_proceso": 12,
+      "proceso": "ADMISIÓN 2024-I JULIACA",
+      "id_modalidad_proceso": 1
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="estado" type="boolean">
+  `true` when the query executed successfully.
+</ResponseField>
+
+<ResponseField name="datos" type="array">
+  Array of payment voucher objects matching the given DNI.
+
+  <ResponseField name="secuencia" type="string">
+    Unique bank transaction sequence number.
+  </ResponseField>
+  <ResponseField name="dni" type="string">
+    Applicant DNI extracted from the bank document number.
+  </ResponseField>
+  <ResponseField name="concepto" type="string">
+    Two-character payment concept code extracted from bytes 7–8 of the `concepto` field.
+  </ResponseField>
+  <ResponseField name="imp_pag" type="string">
+    Amount paid (as a decimal string).
+  </ResponseField>
+  <ResponseField name="fch_pag" type="string">
+    Payment date in `YYYY-MM-DD` format.
+  </ResponseField>
+  <ResponseField name="nom_cli" type="string">
+    Payer's full name as recorded by the bank.
+  </ResponseField>
+  <ResponseField name="estado" type="integer">
+    Payment usage status. `0` = unused (available), `1` = applied to a process.
+  </ResponseField>
+  <ResponseField name="fecha_usado" type="string | null">
+    Date the voucher was applied to an admission process; `null` if unused.
+  </ResponseField>
+  <ResponseField name="id_usuario" type="integer | null">
+    ID of the staff user who applied the voucher; `null` if unused.
+  </ResponseField>
+  <ResponseField name="id_proceso" type="integer | null">
+    ID of the admission process the payment is assigned to; `null` if unassigned.
+  </ResponseField>
+  <ResponseField name="proceso" type="string | null">
+    Name of the admission process from the joined `procesos` table.
+  </ResponseField>
+  <ResponseField name="id_modalidad_proceso" type="integer | null">
+    Modality ID of the linked process.
+  </ResponseField>
+</ResponseField>
+
+---
+
+## POST /api/get-pagos-banco-secuencia
+
+Returns the bank payment voucher that matches a specific bank sequence number. Returns an array with one element when found, or an empty array when no match exists.
+
+**Authentication:** None.
+
+### Request Body
+
+<ParamField body="secuencia" type="string" required>
+  The bank sequence number of the payment voucher to look up (e.g., `"000987654"`).
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST https://your-domain.com/api/get-pagos-banco-secuencia \
+  -H "Content-Type: application/json" \
+  -d '{"secuencia": "000987654"}'
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "estado": true,
+  "datos": [
+    {
+      "secuencia": "000987654",
+      "dni": "12345678",
+      "concepto": "01",
+      "imp_pag": "150.00",
+      "fch_pag": "2025-02-20",
+      "nom_cli": "JUAN QUISPE MAMANI",
+      "estado": 0,
+      "fecha_usado": null,
+      "id_usuario": null,
+      "id_proceso": 12,
+      "proceso": "ADMISIÓN 2024-I JULIACA",
+      "id_modalidad_proceso": 1
+    }
+  ]
+}
+```
+
+The response fields are identical to those described in [POST /api/get-pagos-banco](#post-apiget-pagos-banco) above.
+
+### Empty result
+
+When no voucher matches the requested sequence number, `datos` is an empty array:
+
+```json
+{
+  "estado": true,
+  "datos": []
+}
+```
+
+<Tip>
+  Use the sequence number lookup when the applicant presents a physical payment receipt. The sequence number is printed on bank deposit slips and uniquely identifies a single transaction regardless of DNI.
+</Tip>

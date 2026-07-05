@@ -1,0 +1,149 @@
+---
+title: "Admin Dashboard: Monitoring Admissions in Real Time"
+sidebarTitle: "Dashboard"
+description: "The administrator dashboard provides a real-time overview of active processes, registered applicants, document review status, payments, and system health."
+---
+
+The admin dashboard is the central command panel for the Sistema de Admisión Web. Every time the administrator logs in, they land at `/admin/dashboard` where all key metrics for the currently active admission process are assembled in a single view. Charts refresh on page load via parallel asynchronous requests, so the figures always reflect the latest database state without requiring a manual refresh.
+
+<Note>
+  Access to the admin dashboard and all routes under the `/admin/*` prefix requires `id_rol = 1`. The `Admin` middleware (`app/Http/Middleware/Admin.php`) enforces this check on every request and returns HTTP 403 if the authenticated user does not meet the requirement. Login automatically redirects users with `id_rol = 1` to `/admin/dashboard`.
+</Note>
+
+## Key Performance Indicators
+
+The top row of the dashboard surfaces four KPI cards, each scoped to the process stored in `auth()->user()->id_proceso`:
+
+| Card | Metric | Source table | Today delta |
+|------|--------|--------------|-------------|
+| **Preinscritos** | Total pre-registrations in the active process | `pre_inscripcion` | `preinscritos_hoy` |
+| **Inscritos** | Completed enrollments (`estado = 0`) | `inscripciones` | `inscritos_hoy` |
+| **Ctrl. Biométrico** | Biometric captures recorded | `control_biometrico` | `biometricos_hoy` |
+| **Ingresantes Total** | Admitted applicants (`apto = 'SI'`) | `resultados` | Exam date(s) |
+
+All four counters are fetched in a single call to `GET /admin/dashboard/resumen-general`, which returns a JSON object with the keys `preinscritos`, `inscritos`, `biometricos`, `postulantes`, `preinscritos_hoy`, `inscritos_hoy`, and `biometricos_hoy`.
+
+## Biometric Progress Bar
+
+Below the KPI cards, a full-width progress bar tracks how many admitted applicants (`total_ingresantes`) have completed biometric registration (`con_biometrico`). The percentage is calculated server-side by `DashboardController::biometricoResumen()` and displayed as a gradient bar. The card also breaks down biometric coverage by academic area (INGENIERÍAS, BIOMÉDICAS, SOCIALES).
+
+```
+GET /admin/dashboard/biometrico-resumen
+```
+
+Response shape:
+
+```json
+{
+  "success": true,
+  "datos": {
+    "total_ingresantes": 842,
+    "con_biometrico": 615,
+    "sin_biometrico": 227,
+    "porcentaje": 73.0,
+    "por_area": [
+      { "area": "INGENIERÍAS", "ingresantes": 410, "biometrico": 320 },
+      { "area": "BIOMÉDICAS",  "ingresantes": 210, "biometrico": 180 },
+      { "area": "SOCIALES",    "ingresantes": 222, "biometrico": 115 }
+    ],
+    "fechas_ingreso": ["2024-11-15", "2024-11-16"]
+  }
+}
+```
+
+## Charts and Visualisations
+
+The dashboard renders seven interactive Chart.js visualisations (Line, Bar, Doughnut, Pie), all powered by `vue-chartjs`. Charts are conditionally rendered — they only appear when `resumen.inscritos > 0`, so a new process with no inscriptions shows a clean empty-state message instead of blank axes.
+
+<CardGroup cols={2}>
+  <Card title="Inscripciones por Fecha" icon="chart-line">
+    A line chart displaying the daily inscription count as a time-series.  
+    Endpoint: `GET /admin/dashboard/timeline-inscripciones`
+  </Card>
+  <Card title="Inscripciones por Género y Área" icon="chart-bar">
+    Grouped bar chart comparing male (`sexo = 1`) and female (`sexo = 2`) applicants across each academic area.  
+    Endpoint: `GET /admin/dashboard/genero-por-area`
+  </Card>
+  <Card title="Postulantes por Área" icon="chart-pie">
+    Doughnut chart breaking down total applicants by INGENIERÍAS, BIOMÉDICAS, and SOCIALES.  
+    Endpoint: `GET /admin/dashboard/postulantes-por-area`
+  </Card>
+  <Card title="Distribución por Modalidad" icon="chart-pie">
+    Doughnut chart showing how inscriptions are distributed across admission modalities (e.g. Ordinario, Especial).  
+    Endpoint: `GET /admin/dashboard/modalidad-distribucion`
+  </Card>
+  <Card title="Top Programas con más Inscritos" icon="list-ol">
+    Horizontal bar chart of the top 15 academic programs by inscription count, colour-coded by area.  
+    Endpoint: `GET /admin/dashboard/inscritos-por-programa`
+  </Card>
+  <Card title="Tipo de Colegio" icon="school">
+    Pie chart showing the `gestion` distribution of applicants' secondary schools (public vs private).  
+    Endpoint: `GET /admin/dashboard/tipo-colegio-distribucion`
+  </Card>
+  <Card title="Biométrico por Área" icon="fingerprint">
+    Grouped bar chart comparing total admitidos vs biometric-registered vs pending per area.  
+    Endpoint: `GET /admin/dashboard/biometrico-resumen`
+  </Card>
+  <Card title="Mejores Inscriptores" icon="users">
+    Ranked list of the top staff members who registered the most inscriptions, with a relative progress bar.  
+    Endpoint: `GET /admin/get-mejores-inscriptores`
+  </Card>
+</CardGroup>
+
+## Demographic Reports
+
+From the dashboard's reporting sub-panel (`/admin/component`), administrators can retrieve additional demographic breakdowns without leaving the section:
+
+| Report | Endpoint | Description |
+|--------|----------|-------------|
+| Gender distribution | `GET /admin/get-inscritos-genero-reporte` | Inscription count grouped by `postulante.sexo` |
+| Age distribution | `GET /admin/get-inscritos-edad-reporte` | Top 7 age groups (`TIMESTAMPDIFF(YEAR, fec_nacimiento, CURDATE())`) |
+| Residence | `GET /admin/get-inscritos-residencia-reporte` | Top 6 department/province/district combinations |
+| Origin | `GET /admin/get-inscritos-procedencia-reporte` | Top 8 birth-place combinations |
+| Graduation year | `GET /admin/get-inscritos-egreso-reporte` | Top 7 high school graduation years |
+| Disability | `GET /admin/get-inscritos-discapacidad-reporte` | Count by `postulante.discapacidad` value |
+| Document type | `GET /admin/get-inscritos-tipo-documento-reporte` | DNI vs foreign document counts |
+| Top schools | `GET /admin/get-inscritos-colegio-reporte` | Top 7 schools by cod_modular |
+| School origin | `GET /admin/get-inscritos-procedencia-colegio-reporte` | Top 7 school locations |
+| School type | `GET /admin/get-inscritos-tipo-colegio-reporte` | Public vs private schools |
+
+## Navigating to Submodules
+
+The `AuthenticatedLayout` sidebar provides direct links to all admin submodules. From the dashboard header the administrator can switch between:
+
+- **Procesos** (`/admin/procesos`) — Create and configure admission processes
+- **Vacantes** (`/admin/vacantes`) — Set seat limits per program and modality
+- **Inscripciones** (`/admin/inscripciones`) — Browse and manage enrollments
+- **Control Biométrico** (`/admin/control-biometrico`) — Biometric registration tracking
+- **Usuarios** — Staff account management
+- **Reportes / Resúmenes** — Export reports as PDF or Excel
+- **Trazabilidad** (`/admin/trazabilidad`) — Full audit trail
+
+## Changing the Active Process
+
+The dashboard always displays data for the process assigned to the authenticated user (`auth()->user()->id_proceso`). To switch context, the administrator calls:
+
+```bash
+POST /admin/cambiar_proceso
+Content-Type: application/json
+
+{ "id_proceso": 12 }
+```
+
+This updates `users.id_proceso` for the authenticated user. All subsequent dashboard requests then aggregate data against the new process ID.
+
+## Audit Trail Access
+
+Every administrative action — from saving a process to editing vacancies — is recorded in the `audit_trail` table via `AuditService`. The trazabilidad view (`/admin/trazabilidad`) provides filterable access to this log.
+
+<Steps>
+  <Step title="Open the Audit Trail">
+    Navigate to **Trazabilidad** in the sidebar or go directly to `/admin/trazabilidad`.
+  </Step>
+  <Step title="Filter by Actor or Action">
+    Use the `action`, `user_id`, `date_from`, and `date_to` query parameters to narrow results. The endpoint is `GET /admin/trazabilidad/data`.
+  </Step>
+  <Step title="Review the Action Summary">
+    Call `GET /admin/trazabilidad/resumen` to get a 30-day breakdown of actions by type, affected model, and top actors.
+  </Step>
+</Steps>

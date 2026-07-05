@@ -1,0 +1,115 @@
+---
+title: "Authenticate with the Admisión Web API Using Sanctum"
+sidebarTitle: "Authentication"
+description: "Obtain a Laravel Sanctum Bearer token via POST /api/login, then pass it in the Authorization header for all protected endpoints."
+---
+
+The Admisión Web API uses **Laravel Sanctum** for token-based authentication. When you successfully log in, Sanctum issues a plain-text personal access token that you include as a Bearer token on every subsequent request to a protected endpoint. Tokens are stored in the database and can be revoked at any time.
+
+## Obtain a Token
+
+Send a `POST` request to `/api/login` with a JSON body containing the user's `email` and `password`. Both fields are required; the request will be rejected with HTTP `400` if either is missing or malformed.
+
+```bash
+curl -X POST https://your-domain.com/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "usuario@unap.edu.pe", "password": "yourpassword"}'
+```
+
+### Successful response — HTTP 200
+
+```json
+{
+  "status": true,
+  "message": "User logged in succesfully",
+  "data": {
+    "id": 42,
+    "name": "Juan Quispe",
+    "email": "usuario@unap.edu.pe",
+    "id_rol": 1,
+    "id_proceso": 9
+  },
+  "token": "1|abcdefghijklmnopqrstuvwxyz..."
+}
+```
+
+### Validation error — HTTP 400
+
+```json
+{
+  "status": false,
+  "errors": ["The email field is required."]
+}
+```
+
+### Invalid credentials — HTTP 401
+
+```json
+{
+  "status": false,
+  "errors": ["Unauthorized"]
+}
+```
+
+<Warning>
+  Store tokens securely — for example, in encrypted server-side session storage or a secure HTTP-only cookie. Never expose a Sanctum token in client-side JavaScript, browser local storage, or version-controlled source code.
+</Warning>
+
+## Use the Token
+
+Once you have a token, pass it in the `Authorization` header as a Bearer token on every call to a Sanctum-protected endpoint.
+
+```bash
+curl https://your-domain.com/api/get-ingresante/12345678/2024/1 \
+  -H "Authorization: Bearer 1|abcdefghijklmnopqrstuvwxyz..."
+```
+
+<Note>
+  Tokens do not have a built-in expiry time in the default Sanctum configuration. They remain valid until the user logs out (which deletes all tokens for that user) or an administrator revokes them manually. Rotate tokens periodically in long-lived integrations to reduce exposure risk.
+</Note>
+
+## Connection Code Lookup
+
+`GET /api/get-codigo-conexion/{codigoConexion}` allows external systems to retrieve a connection code by passing a code identifier in the URL path. No Sanctum token is required.
+
+```bash
+curl https://your-domain.com/api/get-codigo-conexion/MY_CODE_HERE
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "status": true,
+  "codigo_conexion": "8hIcptrxisoqUtpvU1YZa9eYaZgViuS0LqI0pq6RfmT3O1QJnyAqzwKQNjzr"
+}
+```
+
+## Mobile App Authentication (`/api/app`)
+
+The API also exposes a dedicated authentication group for the mobile application at `/api/app/login` and `/api/app/registro`. These endpoints follow the same Sanctum token flow but validate against `email` + `password` and return a slightly different response shape.
+
+```bash
+curl -X POST https://your-domain.com/api/app/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "usuario@unap.edu.pe", "password": "yourpassword"}'
+```
+
+### Mobile login response — HTTP 200
+
+```json
+{
+  "success": true,
+  "token": "3|xyz...",
+  "user": {
+    "id": 42,
+    "nombre": "Juan Quispe",
+    "email": "usuario@unap.edu.pe",
+    "id_rol": 8
+  }
+}
+```
+
+<Tip>
+  The `id_rol` field in the user object determines which parts of the application the authenticated user can access. Role `1` is the administrator role; role `8` is the standard applicant-facing mobile role.
+</Tip>

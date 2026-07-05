@@ -1,0 +1,102 @@
+---
+title: "Sistema de Admisión Web: University Admissions Platform"
+sidebarTitle: "Introduction"
+description: "Sistema de Admisión Web is a Laravel 11 + Vue 3 platform that digitizes the complete university admissions lifecycle for Peruvian higher-education institutions."
+---
+
+Sistema de Admisión Web is a full-stack university admissions platform built to replace paper-based and fragmented digital workflows at Peruvian higher-education institutions. It centralises every stage of the admissions process — from applicant pre-registration and document submission through biometric verification, scoring, and final enrolment — into a single, role-aware web application. Staff, reviewers, and applicants all interact through the same system, eliminating data silos and providing real-time visibility across all admission modalities.
+
+## Technology Stack
+
+The platform is built on a modern, production-proven set of technologies chosen for reliability and developer productivity.
+
+| Layer | Technology |
+|---|---|
+| Backend framework | Laravel 11 (PHP 8.2+) |
+| Frontend framework | Vue 3 with Composition API |
+| SPA bridge | Inertia.js (`inertiajs/inertia-laravel ^1.3`) |
+| UI component library | Ant Design Vue 4 (`ant-design-vue ^4.2.6`) |
+| Utility CSS | Tailwind CSS 3 with `@tailwindcss/forms` plugin |
+| Build tool | Vite 4 with `laravel-vite-plugin` and `@vitejs/plugin-vue` |
+| Database | MySQL (via Laravel Eloquent ORM) |
+| Cache / Queue | Redis (`predis/predis ^3.4`) |
+| Push notifications | Firebase Cloud Messaging (`kreait/firebase-php ^7.24`, Firebase JS SDK `^12.14.0`) |
+| Authentication | Laravel Breeze + Laravel Sanctum + Google OAuth via Laravel Socialite |
+| Authorisation | Custom RBAC system (`rbac_modules`, `rbac_views`, `rbac_actions`, `rbac_permissions` tables) |
+| PDF generation | DomPDF, mPDF, TCPDF, FPDI, and barcode generation via `milon/barcode` |
+| Excel export | Maatwebsite Excel 3.1 |
+| API documentation | L5-Swagger (`darkaonline/l5-swagger ^11.1`) |
+| Developer tooling | Laravel Telescope, Laravel Pint, Laravel Sail |
+
+## User Roles
+
+Access and routing are controlled through a custom role-based access control (RBAC) system. Each authenticated user carries an `id_rol` that gates them into a dedicated section of the application.
+
+| Role ID | Name | Responsibility |
+|---|---|---|
+| 1 | **Admin** | Full platform access. Manages processes, programmes, modalities, vacancies, tariffs, users, roles, and all administrative configuration. Accesses the central dashboard at `/admin/dashboard`. |
+| 2 | **Revisor** | Reviews and validates applicant documents. Approves or observes uploaded files, initiates and finalises review sessions, manages biometric check-in printouts, and issues re-notification requests to applicants. |
+| 3 | **Segundas** | Operates the "segundas oportunidades" (second-chance) admissions modality, including its own pre-registration, enrolment, vacancy, modality, and results sub-system at `/segundas`. |
+| 6 | **Simulacro** | Manages mock-exam (simulacro) events: participant registration, school management, entry control, and results uploads. Routed to `/simulacro` on login. |
+| 7 | **Calificador** | Handles scoring workflows — loads IDE answer files, applies weighting (ponderación) tables, and processes final exam results. Routed to `/calificacion` on login. |
+| 8 | **Postulante** | The applicant. Registers personal data, uploads required documents, requests review, tracks document status in real time via FCM push notifications, and views admission results. Routed to `/postulante/dashboard` on login. |
+
+## Core Modules
+
+The platform is organised into named modules that map directly to the RBAC permission tree seeded by `RbacSeeder`.
+
+- **Dashboard** — Aggregate metrics including applicants by area, inscription counts, biometric progress, and daily activity charts (powered by Chart.js and `vue-chartjs`).
+- **Gestión de Admisión** — Pre-registration, inscription management, biometric control, photo and fingerprint capture, score management, and student records.
+- **Mantenimiento** — Reference-data management: branches (filiales), admission processes, academic programmes, modalities, schools (colegios), territorial data (ubigeo), payment tariffs, regulations, and academic years.
+- **Gestión de Participantes** — Faculty (docentes), administrative staff, lottery (sorteo), and participant assignment for examination events.
+- **Gestión Técnica** — Guardian (apoderado) management, full applicant profile management, RENIEC identity queries, document repositories, previous-study records, bank payment reconciliation, electronic signature certificates, database backup, and audit trail (trazabilidad).
+- **Roles y Usuarios** — User and role administration; permission assignment through the RBAC matrix.
+- **Reportes** — General summaries, inscription reports, daily programme and user reports, acceptance ratios, biometric results, and error reports — all exportable to Excel.
+- **Módulo Postulante** — The applicant-facing portal: process selection, document upload (with PDF preview via `pdfjs-dist`), review request, real-time status tracking, push notifications, and result consultation.
+- **Simulacro** — End-to-end mock-exam management including registration, payment tracking, school assignment, entry control, and score import.
+- **Segundas Oportunidades** — A self-contained second-chance admissions pipeline with its own pre-registration, inscription, vacancy, identity verification, and results modules.
+- **Calificación** — IDE/answer-file loading, ponderación configuration, and final score computation.
+- **Centro de Ayuda** — Blog-style help articles for applicants and staff.
+
+## External Integrations
+
+| Integration | Purpose |
+|---|---|
+| **RENIEC API** | Validates Peruvian national identity documents (DNI) during applicant registration and guardian verification. Checks age eligibility in real time. |
+| **Banco de la Nación / OTI** | Reconciles bank payment vouchers (`banco_pagos`, `pago_oti` tables) against inscription fees to confirm enrolment eligibility. |
+| **Firebase Cloud Messaging (FCM)** | Delivers real-time push notifications to applicants when document status changes — approved, observed, or re-notified by a revisor. Uses `kreait/firebase-php` on the server and the Firebase JS SDK on the client. |
+| **Google OAuth** | Applicants and staff can sign in with their Google account via Laravel Socialite (`laravel/socialite ^5.27`). |
+| **Electronic Signature Service** | Verifies digital signatures on uploaded PDF documents by calling an external signature-verification endpoint. Validates certificate issuer, signing date, and signatory identity. |
+
+## Where to Go Next
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Clone the repository and run the platform locally in five steps.
+  </Card>
+  <Card
+    title="Configuration"
+    icon="gear"
+    href="/configuration"
+  >
+    Full reference for every environment variable in `.env.example`.
+  </Card>
+  <Card
+    title="Roles & Permissions"
+    icon="shield-halved"
+    href="/concepts/roles-permissions"
+  >
+    Deep-dive into the custom RBAC system — modules, views, actions, and role assignment.
+  </Card>
+  <Card
+    title="Admission Process"
+    icon="graduation-cap"
+    href="/concepts/admission-process"
+  >
+    Understand the end-to-end admissions lifecycle from pre-registration to final enrolment.
+  </Card>
+</CardGroup>

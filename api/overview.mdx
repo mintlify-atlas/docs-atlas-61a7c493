@@ -1,0 +1,77 @@
+---
+title: "REST API Overview for Sistema de Admisión Web"
+sidebarTitle: "Overview"
+description: "The Admisión Web REST API provides endpoints for admission data integration — applicant lookup, process queries, payment verification, biometric upload, and health checks."
+---
+
+The Admisión Web REST API exposes a set of JSON endpoints that power integrations between the university's admission platform and external services, mobile apps, and partner systems. All endpoints are served under the `/api` prefix of your deployment domain and return standard JSON responses.
+
+## Base URL
+
+```
+https://your-domain.com/api
+```
+
+## Authentication
+
+The API uses **Laravel Sanctum** for token-based authentication. Protected endpoints require a valid Bearer token in the `Authorization` header. Several read-only or public-facing endpoints (such as score lookups, payment checks, and biometric uploads) are accessible without a token. The `cepre` middleware guards a small subset of CEPRE-specific endpoints with its own access policy.
+
+<Note>
+  Pass Sanctum tokens in every protected request as `Authorization: Bearer {token}`. Tokens are issued by `POST /api/login` and remain valid until explicitly revoked.
+</Note>
+
+## Response Format
+
+Every response is a JSON object. Successful responses typically include an `estado` (or `status`) boolean and a `datos` (or `data`) payload. Error responses include an `errors` array or a `mensaje` string describing the failure.
+
+```json
+{
+  "estado": true,
+  "datos": { ... }
+}
+```
+
+## Rate Limiting
+
+Most endpoints have no explicit rate limit beyond Laravel's default. The `POST /api/v1/postulante-cepre-inscrito` endpoint applies a **50 requests per minute** throttle (`throttle:50,1`) to prevent abuse of the CEPRE enrollment check.
+
+## Health Check
+
+`GET /api/health` verifies the availability of the database and storage subsystems and returns an HTTP `200` when healthy or `503` when degraded. No authentication is required.
+
+## Endpoint Reference
+
+The table below lists every publicly documented API route, its HTTP method, authentication requirement, and purpose.
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/health` | None | System health check (database + storage) |
+| `POST` | `/login` | None | Obtain a Sanctum Bearer token |
+| `GET` | `/get-codigo-conexion/{codigoConexion}` | None | Look up a connection code |
+| `GET` | `/get-ingresante/{dni}/{anio}/{ciclo}` | Sanctum | Get admitted student record |
+| `GET` | `/get-postulante-pago/{dni}/{proceso}` | Sanctum | Get applicant payment status |
+| `GET` | `/v1/get-postulante-inscrito/{dni}` | Sanctum | List processes an applicant is enrolled in |
+| `POST` | `/get-procesos` | Sanctum | List admission processes (paginated) |
+| `GET` | `/get-puntaje/{dni}` | None | Get applicant score record |
+| `GET` | `/v1/resultados_simulacro/{dni}` | None | Get simulacro exam results |
+| `GET` | `/verificar-ingreso/{periodo}/{dni}` | None | Verify admission status for a period |
+| `GET` | `/biometrico/seguimiento/{periodo}/{dni}` | None | Biometric tracking data |
+| `GET` | `/v1/observados-cepre/{dni}` | `cepre` | Get observed/flagged CEPRE applicant |
+| `POST` | `/v1/postulante-cepre-inscrito` | None (throttled 50/min) | Check CEPRE enrollment status |
+| `POST` | `/get-pagos-banco` | None | Get bank payment vouchers by DNI |
+| `POST` | `/get-pagos-banco-secuencia` | None | Get bank payment voucher by sequence number |
+| `POST` | `/cargar-imagen` | None | Upload biometric image (main campus) |
+| `POST` | `/cargar-imagen-cepre` | None | Upload biometric image (CEPRE) |
+| `POST` | `/cargar-imagen-juli` | None | Upload biometric image (Juli campus) |
+| `POST` | `/cargar-imagen-azangaro` | None | Upload biometric image (Azangaro campus) |
+| `POST` | `/helper-photos` | None | Bulk biometric photo upload (Face + fingerprints) |
+| `GET` | `/get-postulante-biometrico/{codigo}` | None | Get biometric status by applicant code |
+| `GET` | `/get-select-procesos` | None | Get active processes for dropdown/select UI |
+
+## Next Steps
+
+- [Authentication](/api/authentication) — learn how to obtain and use Sanctum tokens.
+- [Applicants](/api/applicants) — query admitted students, scores, and enrollment.
+- [Processes](/api/processes) — list active admission processes.
+- [Payments](/api/payments) — verify bank payment vouchers.
+- [Biometrics](/api/biometrics) — upload fingerprint and photo images.

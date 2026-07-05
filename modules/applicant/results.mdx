@@ -1,0 +1,187 @@
+---
+title: "Checking Admission Results and Downloading Certificates"
+sidebarTitle: "Results"
+description: "Admitted applicants can look up their results, download PDF admission certificates, and access enrollment credentials once the process administrator publishes results."
+---
+
+Once an admission process has concluded and the administrator has published results, applicants can view their scores, ranking, and admission status through the `Postulante/Resultados` page (`GET /postulante/mis-resultados`). The `PostulanteResultadoController` drives this page, resolving the authenticated user's DNI against the `resultados` table (backed by the `Ingresante` model) and returning all matching result records alongside the list of active processes, available programs, and modalities. Results are **not visible** until the process administrator publishes them for a given process.
+
+## Navigating the Results Page
+
+The results page presents two tabs:
+
+<CardGroup cols={2}>
+  <Card title="Mi Rendimiento" icon="chart-bar">
+    Shows the applicant's own results across all processes they participated in — score, rank, admission status, percentile vs. same-modality peers, and a visual bar comparing their score against the minimum, average, and maximum for their modality.
+  </Card>
+  <Card title="Listas de Ingresantes" icon="list">
+    Allows browsing the full published results list for any active process, grouped by year. Supports filtering by program and modality, plus search by DNI or name. DNIs of other applicants are masked to show only the first three digits.
+  </Card>
+</CardGroup>
+
+## My Results (Mi Rendimiento)
+
+When the tab loads, it calls:
+
+```
+GET /postulante/mis-resultados/mi-rendimiento
+```
+
+The response includes one entry per process the applicant participated in:
+
+```json
+{
+  "estado": true,
+  "datos": [
+    {
+      "id_proceso": 12,
+      "proceso": "Admisión Ordinaria 2024-I",
+      "anio": "2024",
+      "id_modalidad": 3,
+      "modalidad_nombre": "Ordinario",
+      "id_programa": 7,
+      "programa_nombre": "Ingeniería de Sistemas",
+      "mi_puntaje": 14.25,
+      "mi_puesto": 5,
+      "mi_puesto_general": 5,
+      "apto": true,
+      "total_ingresantes_modalidad": 120,
+      "promedio_modalidad": 12.80,
+      "puntaje_max_modalidad": 18.50,
+      "puntaje_min_modalidad": 8.00,
+      "percentil": 95.8
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `mi_puntaje` | Applicant's final admission score |
+| `mi_puesto` | Rank within the modality |
+| `mi_puesto_general` | Overall rank across all modalities in the process |
+| `apto` | `true` if admitted, `false` if not |
+| `percentil` | Percentage of same-modality participants the applicant scored above |
+| `promedio_modalidad` | Average score for the applicant's modality |
+
+## Public API: Score Lookup by DNI
+
+A public endpoint is available for looking up results without authentication. This is used for score verification pages accessible to applicants who have not yet logged in:
+
+```
+GET /api/get-puntaje/{dni}
+```
+
+This resolves the DNI against the `resultados` table and returns the applicant's score and admission status. The endpoint is served by `BlogController@getPuntajes`.
+
+```javascript
+// Public score lookup
+const getScore = async (dni) => {
+  const res = await axios.get(`/api/get-puntaje/${dni}`);
+  return res.data; // score, admission status, program, process
+};
+```
+
+## Browsing the Full Admissions List
+
+To load the paginated list of admitted applicants for a specific process:
+
+```
+GET /postulante/mis-resultados/proceso?id_proceso={id}&search={q}&id_programa={id}&id_modalidad={id}
+```
+
+Results are paginated at 50 per page. The applicant is limited to **100 queries per day** across all process lookups (tracked per user in the session). When the remaining query count drops to 2 or fewer, a warning banner is shown in the UI.
+
+```javascript
+// Load ingresantes for a process (page 1, filtered by program)
+const loadIngresantes = async (idProceso, page = 1) => {
+  const res = await axios.get('/postulante/mis-resultados/proceso', {
+    params: {
+      id_proceso: idProceso,
+      page,
+      id_programa: filtroPrograma.value,
+      id_modalidad: filtroModalidad.value,
+      search: searchQuery.value,
+    },
+  });
+  return res.data.datos; // Laravel paginator
+};
+```
+
+## Simulacro Result Lookup
+
+For applicants who participated in practice exams (simulacros), results can be retrieved via the public API:
+
+```
+GET /api/v1/resultados_simulacro/{dni}
+```
+
+Served by `ResCepreController@obtenerInformacionEstudiante`, this endpoint returns the student's simulacro performance record. It is accessible without authentication and is used by the public results page at `/resultado-simulacro`.
+
+## Verifying Admission (Ingreso) Status
+
+To programmatically verify whether a given DNI is recorded as an admitted student for a specific admission period:
+
+```
+GET /api/verificar-ingreso/{periodo}/{dni}
+```
+
+Served by `ApixController@esIngresante`. Returns a boolean confirmation of admission status for the specified period. This endpoint is used for external integrations and biometric verification workflows.
+
+```javascript
+// Verify ingreso for periodo "2024-I"
+const verify = async (periodo, dni) => {
+  const res = await axios.get(`/api/verificar-ingreso/${periodo}/${dni}`);
+  return res.data; // { ingresante: true|false, ... }
+};
+```
+
+## Downloading PDF Admission Certificates
+
+Admitted applicants can generate and download official PDF admission certificates. Certificates are managed by the `CertificadoController`:
+
+```
+POST /save-certificado     → Generate and save a certificate
+GET  /certificado          → View certificate page
+POST /get-certificados-postulante → Retrieve all certificates for the applicant
+GET  /eliminar-certificado/{id}   → Remove a certificate record
+```
+
+The certificate view is accessible at `/certificado` and renders `Publico/Resultados/components/certificado`. Generated certificate PDFs include the applicant's full name, DNI, admitted program, modality, score, rank, and process year.
+
+## Downloading the Ingreso Credential
+
+Digital admission credentials (certificado digital) can be created from the applicant's profile section:
+
+```
+POST /crear-certificado-digital   → Generate the digital credential
+GET  /get-certificado-digital     → Download the existing digital credential
+```
+
+Both routes are authenticated and generate a signed document confirming the applicant's admission. The credential is also accessible from the public results pages at `/ver-puntaje-alcanzado` and `/{proceso-slug}/resultados`.
+
+## Process and Year Navigation
+
+Processes on the results page are grouped by year for easy navigation. The controller passes `procesos` to the Vue page as an array grouped by `anio`:
+
+```json
+[
+  {
+    "anio": "2024",
+    "procesos": [
+      { "id": 12, "nombre": "Admisión Ordinaria 2024-I", "slug": "admision-2024-i", "estado": 1 },
+      { "id": 11, "nombre": "Admisión Extraordinaria 2024", "slug": "admision-ext-2024", "estado": 1 }
+    ]
+  },
+  {
+    "anio": "2023",
+    "procesos": [...]
+  }
+]
+```
+
+Only processes with `estado = 1` and `nivel = 1` are included in the applicant-facing view.
+
+<Note>
+  Results for a given admission process are only visible once the process administrator explicitly publishes them. If you participated in a process and do not yet see your results under _Mi Rendimiento_, it means the administrator has not yet released the results for that cycle. Check back after the official results announcement date published by the admissions office.
+</Note>

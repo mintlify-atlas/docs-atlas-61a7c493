@@ -1,47 +1,132 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Sistema de Admisión Web"
+sidebarTitle: "Quickstart"
+description: "Clone, configure, and run the Sistema de Admisión Web locally in five steps using Laravel Sail or a standard LAMP stack."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+This guide walks you through getting a fully functional local instance of Sistema de Admisión Web running on your machine. The process covers cloning the source code, installing all PHP and JavaScript dependencies, wiring up the environment file, running the database migrations and seeders, and starting the development servers. The whole setup typically takes under ten minutes on a machine that already has the required runtimes installed.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+<Note>
+  **Prerequisites:** PHP **8.2 or higher** and Node.js **18 or higher** are required. You also need Composer, a running MySQL instance (8.0+ recommended), and optionally Redis if you plan to use the cache and queue drivers beyond the defaults. Verify your versions with `php -v` and `node -v` before proceeding.
+</Note>
 
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+## Setup Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the project from GitHub and enter the project directory.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/ariellukezz/admision-web.git
+    cd admision-web
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Install PHP dependencies">
+    Use Composer to install all backend packages declared in `composer.json`. This pulls in Laravel 11, Inertia.js server-side adapter, Spatie Permission, Firebase PHP SDK, PDF generation libraries, and all other PHP dependencies.
 
     ```bash
-    your-cli init
+    composer install
+    ```
+
+    <Note>
+      If you are running in a production-like environment, add the `--no-dev --optimize-autoloader` flags to skip development-only packages and optimise the Composer autoloader.
+    </Note>
+  </Step>
+
+  <Step title="Install JavaScript dependencies">
+    Install all frontend packages declared in `package.json` — including Vue 3, Inertia.js client adapter, Ant Design Vue 4, Tailwind CSS, Vite, Chart.js, Firebase JS SDK, and the rest of the frontend toolchain.
+
+    ```bash
+    npm install
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Configure the environment">
+    Copy the example environment file to create your local `.env`, then generate a unique application encryption key.
 
     ```bash
-    your-cli start
+    cp .env.example .env
+    php artisan key:generate
     ```
+
+    Next, open `.env` in your editor and update the database connection variables to match your local MySQL instance:
+
+    ```bash
+    DB_CONNECTION=mysql
+    DB_HOST=127.0.0.1
+    DB_PORT=3306
+    DB_DATABASE=admision_web
+    DB_USERNAME=root
+    DB_PASSWORD=your_password
+    ```
+
+    If you want to enable push notifications during local development, also set the Firebase variables — see the [Configuration reference](/configuration) for the full list of available variables.
+  </Step>
+
+  <Step title="Run migrations and seeders">
+    Create all database tables and seed the initial RBAC data (modules, views, actions, and permissions) with a single command.
+
+    ```bash
+    php artisan migrate --seed
+    ```
+
+    The `RbacSeeder` populates the `rbac_modules`, `rbac_views`, `rbac_actions`, and `rbac_permissions` tables. Once complete, you can assign permissions to roles through the **Roles y Usuarios** module in the admin panel.
+  </Step>
+
+  <Step title="Start the development servers">
+    The application requires two processes running in parallel: the Laravel PHP development server and the Vite asset bundler with Hot Module Replacement.
+
+    Open two terminal windows (or use a process manager) and run each command in its own window:
+
+    ```bash
+    # Terminal 1 — Laravel backend
+    php artisan serve
+    ```
+
+    ```bash
+    # Terminal 2 — Vite frontend (HMR on port 5173)
+    npm run dev
+    ```
+
+    Once both servers are running, open [http://localhost:8000](http://localhost:8000) in your browser. The login page will load, served by Inertia.js with assets hot-reloaded by Vite.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Dev Server Commands at a Glance
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<CodeGroup>
+
+```bash PHP (Laravel)
+# Start the PHP development server on http://localhost:8000
+php artisan serve
+```
+
+```bash Vite (Frontend)
+# Start Vite with HMR on http://localhost:5173
+npm run dev
+```
+
+```bash Vite (Production build)
+# Compile and version all frontend assets for production
+npm run build
+```
+
+</CodeGroup>
+
+## What Happens After Login
+
+After successfully logging in, the `RedireccionarARol` middleware inspects the authenticated user's `id_rol` and redirects them to their dedicated portal:
+
+| Role | Landing URL |
+|---|---|
+| Admin (1) | `/admin/dashboard` |
+| Revisor (2) | `/revisor` |
+| Segundas (3) | `/segundas` |
+| Simulacro (6) | `/simulacro` |
+| Calificador (7) | `/calificacion` |
+| Postulante (8) | `/postulante/dashboard?seleccionar_proceso=1` |
+
+<Note>
+  The first time you log in as **Admin**, navigate to **Roles y Usuarios → Roles** to assign RBAC permissions to each role. Roles are seeded without permissions by default — the `RbacSeeder` creates the permission matrix but does not bind it to any role automatically.
+</Note>

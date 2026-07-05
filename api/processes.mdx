@@ -1,0 +1,210 @@
+---
+title: "REST API Endpoints for Admission Processes"
+sidebarTitle: "Processes"
+description: "List active admission processes and retrieve process select options using the authenticated POST /api/get-procesos and public GET /api/get-select-procesos endpoints."
+---
+
+The processes endpoints expose the catalogue of university admission processes configured in the platform. Use the authenticated `POST /api/get-procesos` endpoint to retrieve a full paginated list for administrative integrations, or the lightweight `GET /api/get-select-procesos` endpoint to populate dropdowns and select menus in external UIs without requiring a token.
+
+---
+
+## POST /api/get-procesos
+
+Returns a paginated list of admission processes. Supports optional filtering by `nivel` (education level) and a free-text `term` that matches against the process name, campus name, modality name, or year.
+
+**Authentication:** Sanctum Bearer token required.
+
+### Request Body (optional filters)
+
+<ParamField body="nivel" type="integer">
+  Filter by education level. `1` = undergraduate (pregrado); `2` = continuing education (segundas especialidades). Omit to return all levels.
+</ParamField>
+
+<ParamField body="term" type="string">
+  Free-text search term matched against process name, campus (filial) name, modality name, and year.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST https://your-domain.com/api/get-procesos \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"nivel": 1, "term": "2024"}'
+```
+
+### Response — HTTP 200
+
+The response wraps a Laravel paginator inside the `datos` key.
+
+```json
+{
+  "estado": true,
+  "datos": {
+    "current_page": 1,
+    "data": [
+      {
+        "id": 12,
+        "nombre": "ADMISIÓN 2024-I JULIACA",
+        "estado": 1,
+        "anio": 2024,
+        "url": "admision-2024-i-juliaca",
+        "fecha_examen": "2024-03-10",
+        "ciclo": 1,
+        "slug": "admision-2024-i-juliaca",
+        "convocatoria": 1,
+        "fec_inicio": "2024-01-15",
+        "fec_fin": "2024-03-08",
+        "fec_examen": "2024-03-10",
+        "observacion": null,
+        "id_sede": 9,
+        "sede": "JULIACA",
+        "nivel": 1,
+        "id_tipo": 1,
+        "tipo": "EXAMEN GENERAL",
+        "codigo_proceso": "ADM24I",
+        "fec_1": "2024-03-10",
+        "fec_2": null,
+        "id_reglamento": 3,
+        "id_modalidad": 1,
+        "modalidad": "ORDINARIO"
+      }
+    ],
+    "per_page": 50,
+    "total": 28
+  }
+}
+```
+
+### Response Fields
+
+<ResponseField name="estado" type="boolean">
+  `true` when the query executed successfully.
+</ResponseField>
+
+<ResponseField name="datos" type="object">
+  Laravel paginated result object.
+
+  <ResponseField name="data" type="array">
+    Array of admission process objects.
+
+    <ResponseField name="id" type="integer">
+      Internal process ID.
+    </ResponseField>
+    <ResponseField name="nombre" type="string">
+      Full display name of the admission process.
+    </ResponseField>
+    <ResponseField name="estado" type="integer">
+      Process status. `1` = active, `0` = inactive.
+    </ResponseField>
+    <ResponseField name="anio" type="integer">
+      Academic year.
+    </ResponseField>
+    <ResponseField name="ciclo" type="integer">
+      Cycle number within the year (`1` or `2`).
+    </ResponseField>
+    <ResponseField name="slug" type="string">
+      URL-friendly identifier used in public enrollment forms.
+    </ResponseField>
+    <ResponseField name="fec_inicio" type="string">
+      Enrollment start date (ISO 8601).
+    </ResponseField>
+    <ResponseField name="fec_fin" type="string">
+      Enrollment end date (ISO 8601).
+    </ResponseField>
+    <ResponseField name="fecha_examen" type="string">
+      Exam date (ISO 8601).
+    </ResponseField>
+    <ResponseField name="sede" type="string">
+      Name of the campus (filial) hosting the process.
+    </ResponseField>
+    <ResponseField name="tipo" type="string">
+      Process type (e.g., `EXAMEN GENERAL`, `CEPRE`).
+    </ResponseField>
+    <ResponseField name="modalidad" type="string">
+      Admission modality name (e.g., `ORDINARIO`, `TRASLADO EXTERNO`).
+    </ResponseField>
+    <ResponseField name="nivel" type="integer">
+      Education level. `1` = pregrado, `2` = segundas especialidades.
+    </ResponseField>
+    <ResponseField name="convocatoria" type="integer">
+      Sequential call number within the year.
+    </ResponseField>
+    <ResponseField name="codigo_proceso" type="string">
+      Short process code used in payment and document references.
+    </ResponseField>
+  </ResponseField>
+
+  <ResponseField name="current_page" type="integer">
+    Current page number.
+  </ResponseField>
+  <ResponseField name="per_page" type="integer">
+    Results per page (fixed at 50).
+  </ResponseField>
+  <ResponseField name="total" type="integer">
+    Total number of processes matching the query.
+  </ResponseField>
+</ResponseField>
+
+<Note>
+  Results are ordered by `procesos.id DESC`, so the most recently created process appears first. Use `term` to narrow results when integrating with search inputs.
+</Note>
+
+---
+
+## GET /api/get-select-procesos
+
+Returns a lightweight list of **active** admission processes formatted for use in select/dropdown UI components. Each object contains only `value` (the process ID), `nombre` (display label), `anio`, and a human-readable `ciclo` label.
+
+**Authentication:** None.
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-select-procesos
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "estado": true,
+  "datos": [
+    {
+      "value": 12,
+      "label": "ADMISIÓN 2024-I JULIACA",
+      "anio": 2024,
+      "ciclo": "I"
+    },
+    {
+      "value": 13,
+      "label": "ADMISIÓN 2024-II JULIACA",
+      "anio": 2024,
+      "ciclo": "II"
+    }
+  ]
+}
+```
+
+### Response Fields
+
+<ResponseField name="datos" type="array">
+  Array of active process option objects.
+
+  <ResponseField name="value" type="integer">
+    Process ID to be used as the select option value.
+  </ResponseField>
+  <ResponseField name="label" type="string">
+    Human-readable process name for display.
+  </ResponseField>
+  <ResponseField name="anio" type="integer">
+    Academic year of the process.
+  </ResponseField>
+  <ResponseField name="ciclo" type="string">
+    Cycle label — `"I"` for cycle 1, `"II"` for cycle 2.
+  </ResponseField>
+</ResponseField>
+
+<Tip>
+  This endpoint is ideal for populating biometric station dropdowns and public-facing enrollment forms, because it requires no authentication and returns only the minimal fields needed for a select component.
+</Tip>

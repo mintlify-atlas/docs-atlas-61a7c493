@@ -1,0 +1,133 @@
+---
+title: "End-to-End Admission Process Flow"
+sidebarTitle: "Admission Process"
+description: "Follow the complete admissions lifecycle from process creation and applicant registration through document review, biometrics, exams, scoring, and final results publication."
+---
+
+The Sistema de Admisión Web models the full university admissions lifecycle as a series of connected stages, each handled by a dedicated module and user role. An *admission process* (`Proceso`) is the central record that ties everything together: it defines the academic year, the participating programs, their vacancies and modalities, the applicable fees, and the document requirements that applicants must satisfy. Every other entity in the system — pre-inscriptions, documents, scores, certificates — belongs to one process, and the active process for any session is tracked per-user through the `id_proceso` field and exposed to every Vue page via the `proceso_actual` shared Inertia prop.
+
+<Note>
+  The system supports **multiple concurrent admission processes**. An admin can have several active processes simultaneously (for example, an *Admisión Ordinaria* and a *Segundas Especialidades* running in parallel). Each user is assigned a current process (`id_proceso`), and admins can switch a user's current process at any time via `POST /admin/cambiar_proceso`.
+</Note>
+
+---
+
+## Admission Lifecycle
+
+<Steps>
+  <Step title="Admin creates the admission process">
+    An administrator navigates to `/admin/procesos` and creates a new `Proceso` record, setting the name, year, and type (ordinary, segundas, CEPRE, etc.). Once the process shell exists, the admin configures:
+
+    - **Programs and vacancies** — each `ProgramaProceso` links a study program to the process and sets vacancy counts per modality (`/admin/vacantes`, `/admin/proceso-configuracion-programa`)
+    - **Modalities** — active admission pathways (e.g., exam, direct entry, transfer) are enabled via `/admin/modalidad`
+    - **Fees (tarifas)** — payment amounts per modality are saved through `/admin/tarifas`
+    - **Document requirements** — the admin defines which document types (`TipoDocumento`) are required for each modality via `/admin/requisitos`, optionally importing a template with `POST /admin/requisitos/importar`
+    - **Regulations** — the official reglamento PDF is uploaded and linked at `/admin/reglamentos`
+
+    The process becomes visible to applicants once its status is active.
+  </Step>
+
+  <Step title="Applicant self-registers (5-step form)">
+    Applicants visit `/{proceso_slug}/preinscripcion` — the `ProcesoController@getFormulario` method resolves the process slug and renders the public registration form. From there, authenticated applicants work through five guided steps under `/postulante/paso-{n}`:
+
+    | Step | Route | Data collected |
+    |---|---|---|
+    | 1 | `/postulante/paso-1` | Personal data: DNI, full name, date of birth, gender, nationality |
+    | 2 | `/postulante/paso-2` | Contact information: phone, email, address, ubigeo (department/province/district) |
+    | 3 | `/postulante/paso-3` | School of origin: institution name, ubigeo, type (public/private), graduation year |
+    | 4 | `/postulante/paso-4` | Guardian (apoderado) information: name, relationship, phone |
+    | 5 | `/postulante/paso-5` | Summary review and confirmation — `POST /postulante/paso-5` calls `confirmarDatos()` |
+
+    At step 1, the system optionally pre-fills data from RENIEC via `GET /postulante/api/reniec/{dni}`. Real-time validation checks for duplicate email (`POST /postulante/api/validar-correo`) and phone (`POST /postulante/api/validar-celular`) before allowing submission. A CAPTCHA challenge (`GET /generar-captcha`) is presented to prevent automated submissions. On completion, the applicant lands at `/postulante/confirmacion/{dni}`.
+  </Step>
+
+  <Step title="Documents submitted and reviewed">
+    After registration, the applicant accesses `/postulante/documentos` to upload each required document. The `PostulanteDocumentoController` manages the full document lifecycle:
+
+    - `GET /postulante/mis-requisitos` — fetches the document requirements for the applicant's modality
+    - `POST /postulante/subir-documento` — uploads a file (stored per-document type)
+    - `POST /postulante/solicitar-revision` — sends a review request to the reviewer queue
+
+    When the applicant submits a review request, a **Firebase Cloud Messaging (FCM)** push notification is dispatched to all online reviewers. The Revisor (id\_rol = 2) receives the request in their dashboard at `/revisor` and reviews each document:
+
+    - `POST /revisor/documento/verify/{id}` — approve or reject with a comment
+    - The applicant receives an FCM notification when their document status changes
+    - Unread notification counts are reflected in real time via the `notificacionesNoLeidas` shared prop
+
+    Admins can perform **bulk validation** at `/admin/validacion-masiva` using `POST /admin/api/validacion-masiva`.
+  </Step>
+
+  <Step title="Identity verified via RENIEC and biometric data captured">
+    Before the exam, applicants' identities are cross-referenced against the RENIEC national registry. Admins run batch verification from `/admin/consulta-reniec` — the `ReniecController@consultarLista` endpoint processes a list of DNIs and flags discrepancies.
+
+    Biometric data (fingerprint + photograph) is then captured:
+
+    - **Photo**: stored via `POST /admin/guardar-foto-inscripcion` (inscription photo) and `POST /admin/guardar-foto-biometrico` (biometric photo)
+    - **Fingerprint**: managed by `HuellaController`
+    - Admins can view the biometric control list at `/admin/control-biometrico` and download a biometric PDF for any applicant via `GET /admin/pdf-biometrio/{dni}` (dompdf)
+
+    Photo verification for simulacro participants is handled separately at `GET /verificacion-fotos`, protected by the `simulacro` middleware.
+  </Step>
+
+  <Step title="Exam simulation (simulacro) conducted and payments verified">
+    The Simulacro module (id\_rol = 6) manages practice exam sessions held before the official exam. The Simulacro operator works under `/simulacro/*`:
+
+    - Registers participants in a simulacro batch
+    - Uploads answer sheets and IDE files for automated scoring
+    - Manages payment records for simulacro fees via `PagoSimulacroController`
+
+    Payment verification against the Banco de la Nación runs through `GET /get-pago-BN/{dni}` (`PagoBancoController@getPagosBN_OTI`). Admin payment oversight is available at `/admin/pagos-banco`. The system also integrates with an internal treasury service to cross-check cash payments (`/get-pago-caja/{dni}`).
+  </Step>
+
+  <Step title="Scores recorded by the Calificador">
+    After the official exam, Calificadores (id\_rol = 7) enter scores under `/calificacion/*`. The scoring workflow:
+
+    1. The Calificador loads their assigned exam area
+    2. Scores (puntajes) are entered per applicant and program
+    3. The `PuntajeController` manages maximum score retrieval (`GET /get-puntajes-maximos-proceso/{proceso_slug}`)
+    4. Vocational test results are handled separately by `DetalleExamenVocacionalController`
+
+    Admins can view ponderación (weighting) settings via `PonderacionController` and cross-check results before publication.
+  </Step>
+
+  <Step title="Results published and certificates generated">
+    Once scores are finalised, the admin publishes results. Applicants can view their own results at `/{proceso_slug}/resultados` (public page rendered by `ProcesoController@getViewResultados`) and at `/postulante/mis-resultados` (authenticated, with detailed performance breakdown from `PostulanteResultadoController@getMiRendimiento`).
+
+    Result documents are uploaded by admins at `POST /save-documento-resultado` and become available for download in the public results section.
+
+    Certificates are generated on demand:
+
+    - `POST /save-certificado` — creates a certificate record for the applicant
+    - `GET /certificado` — renders the certificate page (Vue component)
+    - Certificate PDFs can be digitally signed; signature verification is available at `GET /verificar/{codigo}` and `GET /verificacion/{codigo}`
+
+    Admins manage the certificate signing infrastructure at `/admin/certificados-firma` (`CertificadoFirmaController`).
+  </Step>
+
+  <Step title="Admitted students receive their ingreso credential">
+    Applicants who meet the admission score threshold are processed as *ingresantes*. The `IngresoController` handles:
+
+    - `GET /admin/pdf-biometrio/{dni}` — generates the ingreso biometric card PDF (mPDF)
+    - `GET /admin/pdf-biometrio-manual/{dni}` — manual re-generation for corrections
+    - `GET /carreras-previas/{dni}` — retrieves prior academic history for transfer cases
+
+    The ingreso record ties back to the applicant's pre-inscription and program selection, providing a complete audit trail from initial registration to admitted status. All actions are logged to the audit trail (`activity_log`) and visible to admins at `/admin/trazabilidad` and to applicants themselves at `/postulante/mis-acciones`.
+  </Step>
+</Steps>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Roles & Permissions" icon="shield-halved" href="/concepts/roles-permissions">
+    Understand which role controls each stage of the admission process and how middleware protects every route.
+  </Card>
+  <Card title="Platform Architecture" icon="layer-group" href="/concepts/architecture">
+    See how Laravel, Inertia.js, and Vue 3 work together to deliver the admissions platform.
+  </Card>
+  <Card title="Revisor Module" icon="file-magnifying-glass" href="/modules/reviewer/workflow">
+    Deep-dive into the document review workflow, notification system, and audit features for Revisores.
+  </Card>
+  <Card title="Admin Process Management" icon="gear" href="/modules/admin/processes">
+    Step-by-step guide to creating and configuring an admission process from the admin panel.
+  </Card>
+</CardGroup>

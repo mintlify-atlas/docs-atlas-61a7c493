@@ -1,0 +1,187 @@
+---
+title: "Configuring Vacancies and Ratios per Program"
+sidebarTitle: "Vacancies"
+description: "Set the number of available seats per program and modality, configure admission ratios, and track occupancy across active admission processes."
+---
+
+Vacancies (`Vacantes`) define how many seats are available for each combination of academic program, admission modality, and process. They form the ceiling against which the results engine checks how many applicants can be admitted. Without vacancy records, no results can be published for that program-modality pair — the results calculation will find zero eligible seats and skip the combination entirely.
+
+## What Vacancies Represent
+
+Every row in the `vacantes` table holds:
+
+| Column | Description |
+|--------|-------------|
+| `id_programa` | FK to `programa` — the academic program |
+| `id_modalidad` | FK to `modalidad` — the admission track |
+| `id_proceso` | FK to `procesos` — the admission process |
+| `vacantes` | Integer seat count |
+| `estado` | 1 = active, 0 = inactive |
+| `id_usuario` | The admin user who last modified this record |
+
+A single academic process typically contains dozens or hundreds of vacancy rows — one per program-modality combination.
+
+## Viewing Vacancies
+
+Navigate to `/admin/vacantes` to open the vacancy management screen (`Admin/Vacantes/index.vue`). The view scopes automatically to the active process (`auth()->user()->id_proceso`) and accepts a `modalidad` filter so you can browse one admission track at a time.
+
+```bash
+POST /admin/get-vacantes-admin
+Content-Type: application/json
+
+{
+  "modalidad": 1,
+  "term": "ingeniería"
+}
+```
+
+The response includes every academic program at the process's `nivel` (1 = undergraduate, 2 = segunda admisión), with a left-joined vacancy row when one exists. Programs without a vacancy record still appear in the list so the administrator can quickly spot unconfigured seats.
+
+**Example response:**
+
+```json
+{
+  "estado": true,
+  "datos": {
+    "data": [
+      {
+        "id_programa": 3,
+        "codigo_sunedu": "00312",
+        "programa": "INGENIERÍA CIVIL",
+        "id_vacante": 47,
+        "vacantes": 80,
+        "estado": 1
+      },
+      {
+        "id_programa": 7,
+        "codigo_sunedu": "00801",
+        "programa": "MEDICINA HUMANA",
+        "id_vacante": null,
+        "vacantes": null,
+        "estado": null
+      }
+    ],
+    "total": 38,
+    "per_page": 50
+  }
+}
+```
+
+## Setting or Updating Vacancy Counts
+
+<Steps>
+  <Step title="Locate the Program Row">
+    Use the search field to filter by `codigo_sunedu` or program name. The list shows all programs registered at the process level.
+  </Step>
+  <Step title="Enter the Seat Count">
+    Click the edit control on the row and type the new vacancy number. A value of `0` is valid and means the program participates in the process but admits nobody through ordinary channels.
+  </Step>
+  <Step title="Save">
+    The form posts to `POST /admin/save-numero-vacantes`. The controller creates a new `Vacante` record if `id_vacante` is absent, or updates the existing record if it is present.
+  </Step>
+</Steps>
+
+```bash
+# Create a new vacancy record
+POST /admin/save-numero-vacantes
+Content-Type: application/json
+
+{
+  "id_programa": 3,
+  "id_modalidad": 1,
+  "vacantes": 80
+}
+
+# Update an existing record
+POST /admin/save-numero-vacantes
+Content-Type: application/json
+
+{
+  "id_vacante": 47,
+  "id_modalidad": 1,
+  "vacantes": 95
+}
+```
+
+**Success response (create):**
+
+```json
+{
+  "titulo": "REGISTRO NUEVO",
+  "estado": true,
+  "datos": { "id": 47, "id_programa": 3, "vacantes": 80, ... }
+}
+```
+
+## Removing a Vacancy Record
+
+To remove a vacancy (effectively disabling a program-modality pair for the active process):
+
+```bash
+POST /admin/delete-vacante
+Content-Type: application/json
+
+{ "id_vacante": 47 }
+```
+
+The controller calls `Vacante::find($request->id_vacante)->delete()`. The program will continue to appear on the vacancy list but with `null` vacancy values, making it easy to reconfigure later.
+
+## Program-Modality Matrix
+
+Administrators can view a condensed pivot matrix of all programs and their active modalities via `ProgramaProcesoController::getProgramaProceso()`:
+
+```bash
+GET /admin/get-programas-proceso
+```
+
+Each row represents a program (`nombre_corto`) and each column corresponds to a modality ID (1–9). Cells contain `"SI"` when an active vacancy exists, or `"-"` when the combination is not configured. This gives a quick bird's-eye view of the entire process configuration.
+
+## Ratio Configuration
+
+Ratios (`Ratio`) allow the results engine to weight or cap admissions by applicant category within a program. For example, a program might reserve 5% of seats for applicants from rural schools or top-performing secondary graduates. The ratio configuration screen is available at:
+
+```
+GET /admin/ratio
+```
+
+Ratios are consulted during result generation to ensure proportional distribution of admitted applicants is respected before the overall vacancy ceiling is applied.
+
+## Dropdown Selects for Vacancy-Scoped Queries
+
+Other modules (results, reports, biometric summary) need to present only modalities or programs that actually have vacancies in the current process. Two helper endpoints serve these dropdowns:
+
+```bash
+# Modalities with at least one vacancy in a process
+GET /admin/get-select-modalidades-proceso/{id_proceso}
+
+# Programs with active vacancies for a modality+process
+POST /admin/get-select-programas-proceso
+{ "id_modalidad": 1, "id_proceso": 14 }
+
+# Programs with active vacancies (admin context, current process)
+GET /admin/get-select-programas-proceso-admin
+
+# Programs filtered by modality, process, and academic area
+POST /admin/get-select-programas-proceso-area
+{ "id_modalidad": 1, "id_proceso": 14, "area": "BIOMÉDICAS" }
+```
+
+## How Vacancies Affect Results
+
+During the results processing step, the engine queries the `vacantes` table for each program-modality-process triple. It then ranks applicants by score and marks as `apto = 'SI'` only those who fall within the seat limit. Any applicant ranked beyond the vacancy count is marked `apto = 'NO'`.
+
+<Warning>
+  Changing a vacancy count after results have been published and made public will cause the displayed rankings to become inconsistent with the stored `apto` flags in the `resultados` table. If you need to adjust seats after publication, rerun the results calculation for the affected program-modality combination and re-publish the results to ensure data integrity.
+</Warning>
+
+## Vacancy Status Tracking
+
+To understand seat fill rates, combine the vacancy count from `vacantes.vacantes` with the inscription count from `inscripciones` filtered to the same `id_programa`, `id_modalidad`, and `id_proceso`. The dashboard's "Top Programas con más Inscritos" chart (`GET /admin/dashboard/inscritos-por-programa`) gives a quick visual of programs that are approaching or exceeding their configured vacancy limits.
+
+| Status | How to identify |
+|--------|----------------|
+| **Unconfigured** | `vacantes.id_vacante IS NULL` in the vacancy list response |
+| **Empty** | `vacantes = 0` — process seats set to zero |
+| **Under capacity** | `inscripciones_count < vacantes` |
+| **At capacity** | `inscripciones_count = vacantes` |
+| **Over-inscribed** | `inscripciones_count > vacantes` (normal — final selection happens at results stage) |

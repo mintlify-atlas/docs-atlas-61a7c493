@@ -1,0 +1,287 @@
+---
+title: "Document Review Workflow for Revisors"
+sidebarTitle: "Workflow"
+description: "Revisors inspect applicant-submitted documents, approve or reject each with reasons, track review history in the audit trail, and use aliases for audit identification."
+---
+
+Revisors (`id_rol = 2`) are the university staff members responsible for evaluating every document that a postulante submits during the admissions process. They work from a dedicated panel at `/revisor`, where they can browse pending revision requests, open individual submissions, inspect uploaded files, mark documents as valid or rejected with observations, and ultimately finalize the review — triggering a Firebase Cloud Messaging notification to the applicant. Every action they take is automatically recorded in the audit trail under their assigned alias so that no personal name is exposed in the audit log.
+
+---
+
+## Access & Middleware
+
+All Revisor routes are declared in `routes/revisor.php` under a single group that enforces two middleware layers:
+
+```php
+Route::prefix('revisor')->middleware('auth', 'revisor')->group(function () {
+    // ...
+});
+```
+
+The `revisor` middleware (`app/Http/Middleware/Revisor.php`) checks that the authenticated user has `id_rol == 2`. Any user with a different role receives a `403 No tienes permisos` response. An additional outer route — the biometric PDF endpoint — also carries this middleware explicitly:
+
+```php
+Route::get('/pdf-datos-biometrico/{dni}', [IngresoController::class, 'pdfbiometrico2'])
+    ->middleware('auth', 'revisor', 'rbac:revisor-biometrico.read');
+```
+
+Fine-grained sub-permissions are layered on top using the `rbac:` middleware guard (e.g., `rbac:revisor-solicitudes.read`, `rbac:revisor-documentos.read`).
+
+---
+
+## Revisor Dashboard
+
+After logging in, a Revisor lands on `/revisor`, which renders `Revisor/revisor.vue`. The dashboard fetches eight API endpoints in parallel on `onMounted` and displays live KPI cards alongside Chart.js visualisations:
+
+| KPI card | API endpoint | Description |
+|---|---|---|
+| Preinscritos | `GET /revisor/dashboard/resumen` | Total pre-inscriptions + today's count |
+| Inscritos | `GET /revisor/dashboard/resumen` | Total inscriptions + today's count |
+| Ctrl. Biométrico | `GET /revisor/dashboard/biometrico-resumen` | Registered vs. pending biometric records |
+| Docs. por Verificar | `GET /revisor/dashboard/resumen` | `documentos_pendientes` / `documentos_verificados` |
+| Comprobantes Pendientes | `GET /revisor/dashboard/resumen` | Payment vouchers awaiting verification |
+| Comprobantes Verificados | `GET /revisor/dashboard/resumen` | Verified payment vouchers |
+| Inscritos por Área | `GET /revisor/dashboard/inscripciones-por-area` | Doughnut breakdown by academic area |
+| Distribución por Modalidad | `GET /revisor/dashboard/modalidad-distribucion` | Doughnut breakdown by admission modality |
+
+All dashboard data is scoped to `auth()->user()->id_proceso`, so each Revisor only sees statistics for their assigned admission process.
+
+<Note>
+  The `RevisorDashboardController` delegates all data queries to `RevisorDashboardService`, which always scopes queries to `id_proceso`. If a Revisor is assigned to multiple processes they can switch with `POST /revisor/cambiar_proceso`.
+</Note>
+
+---
+
+## Document Review Steps
+
+<Steps>
+  <Step title="Log in as Revisor">
+    Authenticate at `/login`. The `AuthenticatedSessionController` detects `id_rol == 2` and redirects to `/revisor`, the Revisor dashboard.
+  </Step>
+
+  <Step title="Open Solicitudes de Revisión">
+    Navigate to `/revisor/solicitudes-revision` (requires `rbac:revisor-solicitudes.read`). This Inertia page renders `Revisor/SolicitudesRevision.vue` and receives the `solicitudes` prop from `RevisorNotificationController::solicitudesRevision()`. An optional `busqueda` query string filters results by DNI or name.
+
+    ```php
+    // RevisorNotificationController.php
+    public function solicitudesRevision(Request $request)
+    {
+        $busqueda  = $request->input('busqueda', '');
+        $solicitudes = $this->service->solicitudesRevision($busqueda);
+
+        return Inertia('Revisor/SolicitudesRevision', [
+            'solicitudes' => $solicitudes,
+            'busqueda'    => $busqueda,
+        ]);
+    }
+    ```
+  </Step>
+
+  <Step title="Initiate the Review">
+    Click on a pending solicitud to open the applicant's profile at `/revisor/postulante/{dni}?solicitud={id}`. Before individual documents can be evaluated, the revisor must call:
+
+    ```
+    POST /revisor/iniciar-revision/{dni}
+    Body: { "solicitud_id": 42 }
+    ```
+
+    `RevisorDocumentoController::iniciarRevision()` delegates to `RevisorDocumentoService::iniciarRevision()`, which stamps the `RevisionSolicitud` record with `revisor_id = Auth::id()` and `iniciada_at = now()`, then immediately sends an FCM push notification to the applicant via `RevisionIniciadaNotification`.
+
+    <Tip>
+      Documents cannot be individually approved or rejected until `iniciarRevision` has been called for that solicitud. The service returns `400` if the solicitud is already assigned to another reviewer.
+    </Tip>
+  </Step>
+
+  <Step title="Inspect Uploaded Documents">
+    Retrieve the document list grouped by requirement type:
+
+    ```
+    GET /revisor/documentos-requisitos/{dni}?solicitud=42
+    ```
+
+    Individual files can be previewed or downloaded without leaving the UI:
+
+    ```
+    GET /revisor/preview-documento-revisor/{id}
+    GET /revisor/descargar-documento-revisor/{id}
+    ```
+
+    Each document is displayed with its current state: `apto_revision` (flagged for review) and `valido` (validated).
+  </Step>
+
+  <Step title="Approve or Reject Each Document">
+    Use `POST /revisor/cambiar-estado-documento` to transition a document's status. The `accion` field drives the state machine:
+
+    | `accion` value | Effect |
+    |---|---|
+    | `apto_revision` | Marks the document as ready for formal validation (`apto_revision = true`). Requires the review to have been initiated first. |
+    | `valido` | Marks the document as fully valid (`valido = true`, `verificado = 1`). Requires `apto_revision = true`. Accepts optional `fecha_caducidad` and `observacion`. |
+    | `desmarcar` | Reverses the most recent approval step — rolls back `valido` first, then `apto_revision` if already unmarked. |
+
+    ```php
+    // RevisorDocumentoController.php
+    public function cambiarEstadoDocumento(CambiarEstadoDocumentoRequest $request)
+    {
+        $result = $this->service->cambiarEstadoDocumento(
+            $request->input('id_documento'),
+            $request->input('accion'),
+            $request->input('fecha_caducidad'),
+            $request->input('observacion')
+        );
+        // ...
+    }
+    ```
+
+    To flag a document with an observation (without fully rejecting it) use:
+
+    ```
+    POST /revisor/observar-documento
+    Body: { "id_documento": 7, "observacion": "Documento ilegible", "solicitud_id": 42 }
+    ```
+  </Step>
+
+  <Step title="Finalize the Review">
+    Once all documents have been evaluated, submit the review result:
+
+    ```
+    POST /revisor/finalizar-revision/{dni}
+    Body: {
+      "solicitud_id": 42,
+      "fecha": "2025-09-15",
+      "hora_inicio": "09:00",
+      "hora_fin": "09:30",
+      "lugar": "Pabellón A - Sala 3",
+      "instrucciones": "Traer DNI original"
+    }
+    ```
+
+    The service inspects all documents in the solicitud. If all pass, a `RevisionCompletadaNotification` is dispatched to the applicant (database + FCM). If some remain pending, an FCM push with `tipo: revision_pendiente` is sent instead, asking the applicant to correct and resubmit.
+
+    A reviewer can also trigger a **quick review** that bulk-validates all eligible documents at once:
+
+    ```
+    POST /revisor/revision-rapida/{dni}
+    Body: { "solicitud_id": 42 }
+    ```
+
+    And re-send a reminder notification to the applicant at any time:
+
+    ```
+    POST /revisor/renotificar-postulante/{dni}
+    Body: { "solicitud_id": 42 }
+    ```
+  </Step>
+
+  <Step title="Audit Trail Entry Created Automatically">
+    Every state-changing action (document approved, observation added, review finalized) is intercepted by `AuditMiddleware`. The middleware sets `is_revisor = true` when `$user->id_rol == 2` and dispatches a `ProcessAuditLog` job asynchronously. The job resolves the reviewer's alias before persisting the record:
+
+    ```php
+    // ProcessAuditLog.php
+    if ($userId && $procesoId && ($this->payload['is_revisor'] ?? false)) {
+        $alias = RevisorAlias::getAlias($userId, $procesoId);
+    }
+    ```
+
+    The resulting `audit_trail` row contains `alias`, `action`, `model_type`, `model_id`, `old_values`, `new_values`, `description`, `target_user_id`, and `id_proceso`.
+  </Step>
+</Steps>
+
+---
+
+## Revisor Aliases
+
+To protect reviewer identity in the audit log while still allowing traceability, every Revisor is automatically assigned an alias the first time they perform a tracked action in a given admission process. Aliases follow the pattern **Revisor N** (e.g., `Revisor 1`, `Revisor 2`), with auto-incrementing numbers scoped per `id_proceso`.
+
+```php
+// RevisorAlias::getAlias() — app/Models/RevisorAlias.php
+public static function getAlias(int $userId, int $procesoId): string
+{
+    $existing = static::where('user_id', $userId)
+        ->where('id_proceso', $procesoId)
+        ->first();
+
+    if ($existing) {
+        return $existing->alias;
+    }
+
+    $maxNumber = static::where('id_proceso', $procesoId)
+        ->selectRaw('CAST(SUBSTRING(alias, 9) AS UNSIGNED) as num')
+        ->orderByDesc(DB::raw('CAST(SUBSTRING(alias, 9) AS UNSIGNED)'))
+        ->value('num');
+
+    $nextNumber = ($maxNumber ?? 0) + 1;
+    $alias = 'Revisor ' . $nextNumber;
+
+    static::create([
+        'user_id'    => $userId,
+        'id_proceso' => $procesoId,
+        'alias'      => $alias,
+    ]);
+
+    return $alias;
+}
+```
+
+Aliases are stored in the `revisor_aliases` table with columns: `user_id`, `id_proceso`, and `alias`. The same alias is reused for every subsequent action the same reviewer takes within that process.
+
+<Note>
+  Aliases are intentionally non-reversible per process. Once `Revisor 3` is assigned to a user for `id_proceso = 5`, all future audit entries for that user–process pair will carry `Revisor 3`. The Admin panel's Trazabilidad view resolves actor names from this alias field via `AuditService::resolveActorName()`.
+</Note>
+
+---
+
+## Audit Trail Reference
+
+Audit entries are stored in the `audit_trail` table, modelled by `App\Models\AuditTrail`. The model exposes several named scopes for querying the log:
+
+```php
+AuditTrail::forUser($userId)           // Filter by acting reviewer
+AuditTrail::forTargetUser($userId)     // Filter by affected applicant
+AuditTrail::forAction('valido')        // Filter by action type
+AuditTrail::forProceso($procesoId)     // Scope to an admission process
+AuditTrail::forModel(Documento::class) // Filter by model type
+```
+
+The `old_values` and `new_values` columns are cast to `array` and hold the document state before and after the action. Admin users can search the full log at `GET /admin/audit-trail` (see `AuditTrailController::getAuditTrail()`), filtering by `action`, `model_type`, `user_id`, `target_user_id`, `id_proceso`, date range, or free-text search across `description` and `alias`.
+
+A per-document audit trail is also maintained in the `documento_audit` table (`DocumentoAudit` model), storing `user_id`, `documento_id`, `action`, `ip`, and `user_agent` for file-level traceability.
+
+---
+
+## Biometric Control Access
+
+Revisors with the `rbac:revisor-biometrico.read` permission can access the biometric PDF for any applicant by DNI. This route lives outside the standard `/revisor/*` prefix but still requires both `auth` and `revisor` middleware:
+
+```
+GET /pdf-datos-biometrico/{dni}
+```
+
+The biometric summary dashboard is available at:
+
+```
+GET /revisor/dashboard/biometrico-resumen
+```
+
+It returns `total_inscritos`, `con_biometrico`, `sin_biometrico`, `porcentaje`, and a `por_area` breakdown, all scoped to the reviewer's `id_proceso`.
+
+---
+
+## Available Document Review Routes
+
+The complete set of document-review API endpoints under `/revisor/*`:
+
+| Method | Path | Controller method | Description |
+|---|---|---|---|
+| `POST` | `/revisor/iniciar-revision/{dni}` | `iniciarRevision` | Start a review session for a DNI |
+| `POST` | `/revisor/finalizar-revision/{dni}` | `finalizarRevision` | Finalize with citación details |
+| `POST` | `/revisor/cambiar-estado-documento` | `cambiarEstadoDocumento` | Approve / reject a single document |
+| `POST` | `/revisor/observar-documento` | `observarDocumento` | Flag a document with an observation |
+| `POST` | `/revisor/revision-rapida/{dni}` | `revisionRapida` | Bulk-validate all eligible documents |
+| `POST` | `/revisor/marcar-apto/{dni}` | `marcarApto` | Mark the applicant as apt |
+| `POST` | `/revisor/renotificar-postulante/{dni}` | `renotificarPostulante` | Re-send FCM reminder to applicant |
+| `GET` | `/revisor/citacion-sugerida/{dni}` | `citacionSugerida` | Get a suggested appointment slot |
+| `GET` | `/revisor/documentos-requisitos/{dni}` | `documentosPorRequisitos` | Documents grouped by requirement |
+
+<Note>
+  Reviewers receive an unread notification badge count through the Inertia shared props system. `HandleInertiaRequests` checks `$user->id_rol == 2` and, if true, calls `$user->unreadNotifications()->count()`, exposing the result as the `notificacionesNoLeidas` prop available to every Inertia page rendered for a Revisor.
+</Note>

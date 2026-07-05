@@ -1,0 +1,195 @@
+---
+title: "Segundas Especialidades Pre-Registration Process"
+sidebarTitle: "Pre-Registration"
+description: "Multi-step pre-registration form for second-specialty applicants collects identity, personal data, SUNEDU-required fields, program selection, and document uploads in a single flow."
+---
+
+Second-specialty applicants complete their pre-registration through a multi-step public wizard accessible without login. The wizard — implemented in `resources/js/Pages/Segundas/Publico/preinscripcion.vue` — was refactored in early 2026 into a set of focused Vue components sharing a single `usePreinscripcion` composable. This separation keeps each page's template lean while all reactive state, API calls, and validations remain centralized and reusable. The flow collects identity verification, personal data, SUNEDU-mandated additional fields, program selection, and document uploads before presenting a verification modal and confirming submission.
+
+<Note>
+The **linguistic identity** and **cultural belonging** fields on Page 2 (AdditionalDataForm) are mandatory under SUNEDU regulations. They are populated from the external identity microservice at `https://test-admision.unap.edu.pe/service_identidad/api/v1/` via the `IdentidadSegundaController` endpoints. Removing or skipping these fields will cause the pre-registration submission to fail SUNEDU validation.
+</Note>
+
+---
+
+## Wizard Structure
+
+The wizard is controlled by the `pagina_pre` reactive integer inside `usePreinscripcion`. Each page maps to a single Vue component rendered conditionally with `v-if`:
+
+| Page | Component | Purpose |
+|---|---|---|
+| 0 | `IdentityValidation.vue` | Document type selection and secret code verification |
+| 1 | `PersonalDataForm.vue` | Names, contact details, address, geographic locations |
+| 2 | `AdditionalDataForm.vue` | Disability, linguistic identity, cultural belonging (SUNEDU) |
+| 3–5 | *(reserved / process-specific steps)* | Additional steps depending on the process |
+| 6 | `ProgramAndDocs.vue` | Second-specialty program selection + document uploads |
+| 7 | `SuccessMessage.vue` | Post-submission confirmation and voucher download |
+
+Navigation between steps is managed by `NavigationButtons.vue`, which appears on all pages except 0 (handled by the identity component itself) and 7. A `VerificationModal.vue` is triggered before final submission on the last content step.
+
+---
+
+## Page-by-Page Detail
+
+### Page 0 — IdentityValidation
+
+`resources/js/Pages/Segundas/Publico/components/IdentityValidation.vue`
+
+The opening step asks the applicant to choose their document type (DNI or other accepted document) and enter their document number alongside a randomly generated verification code displayed on-screen. Key interactions:
+
+- `getCodigoAleatorio` — generates and stores the one-time verification code
+- `validateCodigoSecreto` — compares the code entered by the applicant against the stored value
+- `getDatosPersonales` — fetches any existing applicant record from the backend and pre-fills subsequent form steps, preventing duplicate submissions
+
+The step emits `@proceed` to advance to page 1 and provides two-way binding via events for `dni`, `codigo_secreto`, and `tipo_doc`.
+
+### Page 1 — PersonalDataForm
+
+`resources/js/Pages/Segundas/Publico/components/PersonalDataForm.vue`
+
+Collects all core personal information:
+
+- **Name fields:** `primerapellido`, `segundo_apellido`, `nombres`
+- **Demographics:** `sexo`, `estado_civil`, `fec_nacimiento`
+- **Contact:** `celular`, `correo` (both validated for uniqueness before submission)
+- **Address:** `direccion`, geographic `nacimiento` (birth ubigeo), geographic `residencia` (current residence ubigeo)
+
+Geographic lookups (`ubigeosNacimiento`, `residencias`) use auto-complete components powered by the shared ubigeo API. The `validateFechaNacimiento` validator enforces a minimum age rule for second-specialty applicants.
+
+### Page 2 — AdditionalDataForm
+
+`resources/js/Pages/Segundas/Publico/components/AdditionalDataForm.vue`
+
+This page collects SUNEDU-required data stored in the `datos_transversales` reactive object:
+
+| Field | Description |
+|---|---|
+| `discapacidad` | Whether the applicant has a disability (boolean) |
+| `tipo_discapacidad` | Disability type (if applicable) |
+| `id_condicion_lengua` | Language condition — from `GET /get-condiciones-lengua-segundas` |
+| `id_lengua_indigena` | Indigenous language — from `GET /get-lengua-segundas` |
+| `id_pertenencia_cultural` | Cultural belonging — from `GET /get-pertenencia-cultural-segundas` |
+| `id_pueblo_indigena` | Indigenous people — from `GET /get-pueblos-indigenes-segundas` |
+
+All four identity dropdowns are loaded at composable initialization time from the `IdentidadSegundaController` and passed as props to this component. The `setFormDatosTransversales` callback is used to register the form ref with the composable for validation.
+
+### Page 6 — ProgramAndDocs
+
+`resources/js/Pages/Segundas/Publico/components/ProgramAndDocs.vue`
+
+The applicant selects their target second-specialty program from a list of authorized programs fetched via `POST /segundas/select-programas-segundas-autorizados` (`ProgramaSegundaController@getSelectProgramasAutorizados`). The `setFormPreinscripcion` callback registers the form for validation.
+
+Document uploads are rendered via a slotted child component:
+
+```vue
+<ProgramAndDocs
+  v-if="pagina_pre === 6"
+  :setFormPreinscripcion="setFormPreinscripcion"
+  :datos_preinscripcion="datos_preinscripcion"
+  :programas="programas"
+  @update:programa="(val) => datos_preinscripcion.programa = val"
+>
+  <template #documents>
+    <Titulo :id_proceso="props.procceso_seleccionado.id" :dni="formState.dni" />
+  </template>
+</ProgramAndDocs>
+```
+
+The `Titulo` component handles the file upload controls for each required document type specific to the selected process.
+
+### Page 7 — SuccessMessage
+
+`resources/js/Pages/Segundas/Publico/components/SuccessMessage.vue`
+
+Displayed when `pagina_pre === 7` or `postulante_inscrito === 1` (the latter handles the case of an applicant who returns to the form and is already enrolled). Provides two action buttons:
+
+- `@download` — triggers `descargaReglamento` to download the regulation document
+- `@downloadGenerados` — triggers `descargaAnexosGenerados` to download the system-generated enrollment annexes and PDF voucher
+
+---
+
+## The `usePreinscripcion` Composable
+
+All reactive state and business logic for the wizard lives in `resources/js/composables/usePreinscripcion.js`. This composable is the single source of truth for the entire multi-step flow:
+
+```vue
+<script setup>
+import { usePreinscripcion } from '@/composables/usePreinscripcion'
+import IdentityValidation from './components/IdentityValidation.vue'
+
+const props = defineProps(['procceso_seleccionado'])
+const { formState, datospersonales } = usePreinscripcion(props)
+</script>
+```
+
+The composable accepts `props` as its argument to access `procceso_seleccionado` (the active admission process object passed by the Inertia controller). It returns the full set of reactive state and functions needed by every component:
+
+| Exported value | Type | Description |
+|---|---|---|
+| `formState` | `reactive` | DNI, document type, verification code |
+| `datospersonales` | `reactive` | All personal data fields |
+| `datos_transversales` | `reactive` | SUNEDU identity and disability fields |
+| `datos_preinscripcion` | `reactive` | Program selection and pre-registration data |
+| `pagina_pre` | `ref` | Current wizard page (0–7) |
+| `ubigeosNacimiento` | `ref` | Birth location options |
+| `residencias` | `ref` | Residence location options |
+| `programas` | `ref` | Available second-specialty programs |
+| `condiciones_lengua` | `ref` | Language condition options |
+| `lenguas_indigenas` | `ref` | Indigenous language options |
+| `opciones_pertenencia_cultural` | `ref` | Cultural belonging options |
+| `pueblos_indigenas` | `ref` | Indigenous peoples options |
+| `codigo_aleatorio` | `ref` | Verification code for Page 0 |
+| `open` | `ref` | Controls VerificationModal visibility |
+| `postulante_inscrito` | `ref` | 1 if already enrolled (skip to page 7) |
+| `getCodigoAleatorio` | function | Generate a new verification code |
+| `validateCodigoSecreto` | function | Validate entered code |
+| `getDatosPersonales` | function | Fetch pre-existing applicant data |
+| `validateFechaNacimiento` | function | Enforce minimum age rule |
+| `validateCelular` | function | Unique phone number check |
+| `validateCorreo` | function | Unique email check |
+| `onSelectNacimiento` | function | Handle birth ubigeo selection |
+| `onSelectResidencias` | function | Handle residence ubigeo selection |
+| `abrirModalDatos` | function | Open VerificationModal |
+| `submit` | function | Final submission API call |
+| `descargaReglamento` | function | Download regulation PDF |
+| `descargaAnexosGenerados` | function | Download generated annexes |
+
+---
+
+## Navigation and Verification Modal
+
+`NavigationButtons.vue` renders at the bottom of every wizard step except pages 0 and 7. It emits three events back to the main `preinscripcion.vue` orchestrator:
+
+- `@previous` → `handlePrevious` — move to `pagina_pre - 1`
+- `@next` → `handleNext` — validate current step, then move to `pagina_pre + 1`
+- `@verify` → `abrirModalDatos` — open the verification modal (shown only on the last content page before submission)
+
+`VerificationModal.vue` displays a complete summary of all collected data — personal details, SUNEDU identity fields, selected program, and document status — alongside a terms-and-conditions checkbox (`checkbox1`). The applicant must review and accept before the `@submit` event fires the final API call.
+
+---
+
+## Validation Rules
+
+| Validation | Where applied | Rule |
+|---|---|---|
+| Verification code | Page 0 | Must match `codigo_aleatorio` exactly |
+| Minimum age | Page 1 (`fec_nacimiento`) | Enforced by `validateFechaNacimiento` |
+| Unique phone | Page 1 (`celular`) | `validateCelular` — checks backend for duplicates |
+| Unique email | Page 1 (`correo`) | `validateCorreo` — checks backend for duplicates |
+| SUNEDU fields | Page 2 | All four identity dropdowns are required |
+| Program selection | Page 6 | Must select a program before proceeding to verification |
+
+---
+
+## API Endpoints Used
+
+| Endpoint | Description |
+|---|---|
+| `POST /segundas/select-programas-segundas-autorizados` | Fetch authorized programs for the active process |
+| `GET /get-condiciones-lengua-segundas` | Populate language condition dropdown |
+| `GET /get-pertenencia-cultural-segundas` | Populate cultural belonging dropdown |
+| `GET /get-lengua-segundas` | Populate indigenous language dropdown |
+| `GET /get-pueblos-indigenes-segundas` | Populate indigenous peoples dropdown |
+| `GET /segundas/get-postulante-datos/{dni}` | Pre-fill form if applicant already exists |
+| `POST /save-postulante-adicional` | Save SUNEDU identity fields |
+| `GET /pdf-preinscripcion/{id_proceso}/{dni}` | Generate and download PDF enrollment voucher |

@@ -1,0 +1,198 @@
+---
+title: "Applicant Registration: Five-Step Enrollment Flow"
+sidebarTitle: "Registration"
+description: "Walk through the five-step applicant registration flow — personal data, contact, school, guardian, and identity verification — with form validation and RENIEC identity checks."
+---
+
+New applicants register through a five-step wizard that collects all the information required to create a complete applicant profile (`postulante`) in the sistema. Each step is saved independently to the database before the wizard advances, meaning a partially completed registration can be resumed at any time. The `PostulanteRegistroController` drives the entire flow, mapping each `Paso` record to a numeric progress value stored in the `avance_postulante` table for the applicant's currently active admission process (`id_proceso`).
+
+## The Five Registration Steps
+
+<Steps>
+  <Step title="Paso 1 — Personal Data">
+    The applicant provides their national identity document number (DNI), full name, date of birth, sex, marital status, and place of birth (ubigeo). Entering a valid 8-digit DNI triggers an automatic **RENIEC lookup** that pre-fills the form fields. If the applicant is under 18, the system allows manual entry and flags `mayor_edad = false`.
+
+    Fields validated and saved to `postulante`:
+
+    | Field | Rule |
+    |---|---|
+    | `nro_doc` | Required, 8 digits for DNI |
+    | `primer_apellido` | Required, max 100 chars |
+    | `nombres` | Required, max 200 chars |
+    | `fec_nacimiento` | Required date |
+    | `ubigeo_nacimiento` | Required, 6-char ubigeo code |
+    | `sexo` | Required (`1` = Masculine, `2` = Feminine) |
+    | `estado_civil` | Optional (mapped: 1 Soltero, 2 Casado, 3 Viudo, 4 Divorciado, 5 Conviviente) |
+
+    On save, the authenticated user's `dni` field is updated so that subsequent steps can resolve `getPostulante()` via `User.dni = Postulante.nro_doc`.
+  </Step>
+
+  <Step title="Paso 2 — Contact Information">
+    Collects the applicant's email address, mobile phone number (`celular`), home address, and residence ubigeo (department → province → district). Both email and phone are validated for **uniqueness** across the `postulante` table and the `users` table before saving.
+
+    Fields validated and saved:
+
+    | Field | Rule |
+    |---|---|
+    | `email` | Required, valid email, unique |
+    | `celular` | Required, min 9 digits, unique |
+    | `direccion` | Required, max 255 chars |
+    | `ubigeo_residencia` | Required, 6-char ubigeo code |
+  </Step>
+
+  <Step title="Paso 3 — School Information">
+    The applicant selects their secondary school (`colegio`) and graduation year (`anio_egreso`). Schools are filtered by ubigeo — the applicant first selects a district via the ubigeo search and then picks from the schools located in that district. The selected school ID is stored as `id_colegio` on the `postulante` record.
+
+    Fields validated and saved:
+
+    | Field | Rule |
+    |---|---|
+    | `id_colegio` | Required, must exist in `colegios` table |
+    | `anio_egreso` | Optional, max 4 chars |
+  </Step>
+
+  <Step title="Paso 4 — Guardian (Apoderado) Data">
+    If the applicant has a legal guardian or parent, one or more `apoderado` records are created. Each guardian entry requires a document number, paternal surname, maternal surname, given names, and a guardian type (`tipo_apoderado`: 1 = Parent, 2 = Legal guardian, 3 = Other). Records are upserted using `updateOrCreate` keyed on `(id_postulante, tipo_apoderado)`.
+
+    Fields validated per guardian:
+
+    | Field | Rule |
+    |---|---|
+    | `nro_documento` | Required, 8–12 chars |
+    | `paterno` | Required, max 100 chars |
+    | `nombres` | Required, max 200 chars |
+    | `tipo_apoderado` | Required, integer in `[1, 2, 3]` |
+  </Step>
+
+  <Step title="Paso 5 — Verification and Confirmation">
+    The applicant reviews a read-only summary of all data entered across steps 1–4, including resolved labels for ubigeo codes and the school name. After confirming, `confirmarDatos` is called which sets `avance = 5` and records the step `DATOS CONFIRMADOS POR POSTULANTE` in the `paso` table at 100% progress. The applicant is then redirected to `Postulante/Confirmacion`.
+  </Step>
+</Steps>
+
+## RENIEC Identity Validation
+
+When a valid 8-digit DNI is entered in Paso 1, the front-end calls `GET /postulante/api/reniec/{dni}`. The controller queries the `consultas_reniec` table (which load-balances API tokens, rotating to the key with the lowest daily usage count) and calls the RENIEC API at `https://service7.unap.edu.pe/api/v1/reniec/consulta/{dni}`.
+
+```javascript
+// Paso1DatosPersonales.vue — DNI search handler
+const searchDni = async () => {
+  if (!form.nro_doc || form.nro_doc.length !== 8) return;
+  searching.value = true;
+  try {
+    const res = await axios.get(`/postulante/api/reniec/${form.nro_doc}`);
+    if (res.data.success && res.data.mayor_edad) {
+      const d = res.data.datos;
+      form.primer_apellido  = d.ap_paterno;
+      form.segundo_apellido = d.ap_materno;
+      form.nombres          = d.nombres;
+      form.fec_nacimiento   = d.fecha_nacimiento;
+      form.sexo             = d.sexo;
+      form.ubigeo_nacimiento = d.ubigeo_nacimiento;
+    }
+  } finally {
+    searching.value = false;
+  }
+};
+```
+
+The API response includes:
+
+```json
+{
+  "success": true,
+  "mayor_edad": true,
+  "datos": {
+    "dni": "12345678",
+    "nombres": "JUAN CARLOS",
+    "ap_paterno": "QUISPE",
+    "ap_materno": "MAMANI",
+    "fecha_nacimiento": "2000-03-15",
+    "sexo": "1",
+    "estado_civil": "SOLTERO",
+    "ubigeo_nacimiento": "210101",
+    "foto_base64": "..."
+  }
+}
+```
+
+If the applicant is a minor (`age < 18`), the API returns `"mayor_edad": false` and the form remains editable for manual entry. Each token has a maximum daily query count (`maximo`) enforced by the `consultas_reniec` table; if the cap is reached the system returns `null` and the form falls back to manual input.
+
+## Unique Validation for Email and Phone
+
+Before saving Paso 2, the controller checks uniqueness in both the `postulante` table and the `users` table. You can also validate proactively via dedicated AJAX endpoints:
+
+```javascript
+// Real-time email uniqueness check
+const checkEmail = async (email) => {
+  const res = await axios.post('/postulante/api/validar-correo', {
+    email,
+    dni: form.nro_doc,
+  });
+  // res.data.existe === true means the email is already taken
+};
+
+// Real-time phone uniqueness check
+const checkCelular = async (celular) => {
+  const res = await axios.post('/postulante/api/validar-celular', {
+    celular,
+    dni: form.nro_doc,
+  });
+};
+```
+
+Both endpoints exclude the current applicant's own record from the check (using `where('nro_doc', '!=', $request->dni)`), so updating existing data does not incorrectly trigger a uniqueness error.
+
+## Google OAuth Registration Path
+
+Applicants may sign up via Google OAuth. When they do, the system assigns them the **Postulante** role automatically. Because Google accounts do not initially have a `dni`, the `getPostulante()` helper returns `null` and the wizard redirects to Paso 1. Once the applicant fills in their DNI in Paso 1 and saves, `User.dni` is populated and subsequent steps resolve the `postulante` relationship normally.
+
+## After Successful Registration
+
+Once Paso 5 is confirmed, the applicant is redirected to:
+
+```
+GET /postulante/confirmacion/{dni}
+```
+
+This renders `Postulante/Confirmacion` and shows the applicant's name, DNI, and registered school. From there, they are directed to the applicant **Dashboard** (`/postulante/dashboard`), which displays a five-step timeline showing their overall onboarding progress.
+
+The dashboard timeline maps registration steps (avance 1–5) plus document submission (`revision_solicitada = true`) to a visual progress tracker with labels such as _Completa tus datos_, _Sube tus documentos_, _Verificación de documentos_, _Verificación biométrica_, and _Inscríbete a un proceso_.
+
+## Resuming an Incomplete Registration
+
+The `misDatos` route checks the applicant's current `avance` and automatically redirects to the first incomplete step:
+
+```
+GET /postulante/mis-datos
+  → avance 0: redirect to /postulante/paso-1
+  → avance 1: redirect to /postulante/paso-2
+  → avance 2: redirect to /postulante/paso-3
+  → avance 3: redirect to /postulante/paso-4
+  → avance 4: redirect to /postulante/paso-5
+  → avance ≥ 5: render MisDatos (read-only view)
+```
+
+## Internal API Reference
+
+<CardGroup cols={2}>
+  <Card title="GET /postulante/api/reniec/{dni}" icon="id-card">
+    Query RENIEC for applicant identity data. Returns full name, birth date, sex, marital status, and ubigeo.
+  </Card>
+  <Card title="POST /postulante/api/validar-correo" icon="envelope">
+    Check whether an email is already registered. Returns `{ existe: true|false }`.
+  </Card>
+  <Card title="POST /postulante/api/validar-celular" icon="phone">
+    Check whether a mobile number is already registered. Returns `{ existe: true|false }`.
+  </Card>
+  <Card title="GET /postulante/api/colegios/{ubigeo}" icon="school">
+    Retrieve the list of schools (`id`, `nombre`) for a given 6-digit ubigeo code.
+  </Card>
+</CardGroup>
+
+<Note>
+  When the applicant's registration is saved for the first time, the system reads `User.id_proceso` to determine which admission process (`id_proceso_actual`) to associate with the new `avance_postulante` record. If the user has not yet selected a process, step progress is recorded but not linked until they choose a process via `POST /postulante/seleccionar-proceso`.
+</Note>
+
+<Tip>
+  Before starting Paso 2, prepare a valid email address and mobile phone number that are not already registered in the system. In the documents step that follows registration, you will need to upload PDFs of your DNI, academic certificates, and any program-specific documents required by the admission modality you select.
+</Tip>

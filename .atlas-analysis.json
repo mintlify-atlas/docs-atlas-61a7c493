@@ -1,0 +1,128 @@
+{
+  "projectType": "saas",
+  "projectName": "Sistema de Admisión Web",
+  "projectDescription": "A full-stack university admissions management platform built with Laravel + Vue 3 (Inertia.js) that handles applicant registration, document review, biometric verification, exam management, results, and multi-role administration for higher education institutions.",
+  "theme": "almond",
+  "primaryColor": "#fc2c24",
+  "lightColor": "#040404",
+  "darkColor": "#e29d78",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/roles-permissions",
+              "concepts/admission-process"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Modules",
+        "groups": [
+          {
+            "group": "Applicant Portal",
+            "pages": [
+              "modules/applicant/registration",
+              "modules/applicant/documents",
+              "modules/applicant/results"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "modules/admin/dashboard",
+              "modules/admin/processes",
+              "modules/admin/vacancies",
+              "modules/admin/reports"
+            ]
+          },
+          {
+            "group": "Document Review",
+            "pages": [
+              "modules/reviewer/workflow",
+              "modules/reviewer/notifications"
+            ]
+          },
+          {
+            "group": "Exams & Scoring",
+            "pages": [
+              "modules/simulacro/management",
+              "modules/calificacion/scoring"
+            ]
+          },
+          {
+            "group": "Segundas Especialidades",
+            "pages": [
+              "modules/segundas/overview",
+              "modules/segundas/preinscripcion"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "REST API",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/applicants",
+              "api/processes",
+              "api/payments",
+              "api/biometrics"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-role access control (Admin, Revisor, Postulante, Simulacro, Calificador, Segundas)",
+    "Step-by-step applicant registration and document submission portal",
+    "Document review and approval workflow with real-time notifications (Firebase/FCM)",
+    "Biometric data capture and verification (fingerprints and photos)",
+    "Exam simulation management and scoring module",
+    "Segundas Especialidades admission process",
+    "PDF generation for admission certificates, credentials, and biometric records",
+    "Excel/XLSX import and export for results and reports",
+    "Google OAuth login integration via Laravel Socialite",
+    "RENIEC identity verification integration",
+    "Bank payment verification via voucher lookup",
+    "Audit trail for all critical administrative actions",
+    "Electronic signature support for institutional documents",
+    "Inertia.js SPA with Vue 3 and Ant Design Vue components"
+  ],
+  "publicApiSurface": [
+    "GET /api/health",
+    "POST /api/login",
+    "GET /api/get-ingresante/{dni}/{anio}/{ciclo}",
+    "GET /api/get-postulante-pago/{dni}/{proceso}",
+    "GET /api/v1/get-postulante-inscrito/{dni}",
+    "POST /api/get-procesos",
+    "GET /api/get-puntaje/{dni}",
+    "GET /api/v1/resultados_simulacro/{dni}",
+    "GET /api/verificar-ingreso/{periodo}/{dni}",
+    "GET /api/biometrico/seguimiento/{periodo}/{dni}",
+    "GET /api/v1/observados-cepre/{dni}",
+    "POST /api/v1/postulante-cepre-inscrito",
+    "POST /api/get-pagos-banco",
+    "POST /api/get-pagos-banco-secuencia",
+    "POST /api/cargar-imagen",
+    "GET /api/get-select-procesos",
+    "GET /api/get-codigo-conexion/{codigoConexion}"
+  ]
+}

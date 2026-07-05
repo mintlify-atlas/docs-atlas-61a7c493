@@ -1,0 +1,148 @@
+---
+title: "Score Entry and Grade Management for Calificadores"
+sidebarTitle: "Scoring"
+description: "Calificadores enter applicant scores per exam component, manage puntaje records, and view vocational exam results from the dedicated scoring panel at /calificacion."
+---
+
+The Calificación module is the grade-entry interface used by exam scorers after an admission exam session. Calificadores are responsible for inputting raw scores for each applicant by knowledge area and sub-component, verifying those values against vocational exam data, and confirming that the records are ready for publication into the final results. All scoring work happens within the protected `/calificacion/*` route namespace.
+
+<Tip>
+Always double-check entered scores against the physical answer sheet before the results batch is published. Once the `ResultadosController` publishes a batch, scores become visible to applicants and administrators; corrections require an administrator to manually reopen the process.
+</Tip>
+
+## Role and Access
+
+The **Calificador** role (`id_rol = 7`) is required for all scoring routes. Upon login, users with this role are redirected to `/calificacion`. Every route under the `/calificacion/*` prefix is protected by the `auth` and `calificador` middleware. A `403 No tienes permisos` error is returned for any other role.
+
+```
+Middleware file: app/Http/Middleware/Calificador.php
+Route prefix:    /calificacion
+Auth redirect:   /calificacion  (after login with id_rol = 7)
+```
+
+---
+
+## Puntaje Model
+
+The `puntajes` table links an applicant (`dni`), an admission process (`id_proceso`), and their computed score (`puntaje`). Key columns used in the scoring module:
+
+| Column | Description |
+|---|---|
+| `dni` | Applicant document number |
+| `id_proceso` | Admission process identifier |
+| `AREA` | Knowledge area: `BIOMEDICAS`, `SOCIALES`, or `INGENIERIAS` |
+| `puntaje` | Raw area score |
+| `puntaje_vocacional` | Score from the vocational orientation exam |
+| `apto` | Eligibility flag (`SI` / `NO`) |
+| `programa` | Intended program of study |
+| `paterno`, `materno`, `nombres` | Applicant name fields |
+| `fecha` | Score entry date |
+
+The combined admission score used for ranking is `puntaje + puntaje_vocacional`. Maximum scores per area are queried by `PuntajeController@getPunajesMaximos`:
+
+```php
+// PuntajeController.php
+$res = DB::select("
+  SELECT pun.AREA, maximos.max_puntaje, pun.dni, pun.paterno, pun.materno, pun.nombres, pun.programa
+  FROM (
+      SELECT AREA, MAX(puntaje + puntaje_vocacional) AS max_puntaje
+      FROM puntajes
+      WHERE id_proceso = 10
+        AND AREA IN ('BIOMEDICAS', 'SOCIALES', 'INGENIERIAS')
+        AND apto = 'SI'
+      GROUP BY AREA
+  ) AS maximos
+  JOIN puntajes pun ON maximos.max_puntaje = (pun.puntaje + pun.puntaje_vocacional)
+    AND pun.area = maximos.area
+  WHERE pun.id_proceso = 10 AND pun.apto = 'SI'
+");
+```
+
+---
+
+## Score Entry Workflow
+
+<Steps>
+  <Step title="Log in as Calificador — redirected to /calificacion">
+    After successful authentication with a `id_rol = 7` account, the system automatically redirects to the Calificación panel (`/calificacion`). This panel renders the `Simulacro/Calificacion/lecturas` Inertia view and uses `LayoutCalificador.vue` as its shell layout.
+
+    The `SubirResultado.vue` component (also accessible from this layout) allows bulk-uploading exam results from an XLSX file before individual score entry begins.
+  </Step>
+
+  <Step title="Select the process / exam">
+    The Calificador selects the active admission process. The process identifier is scoped per authenticated user via `auth()->user()->id_proceso`, so each Calificador only sees the exam batch assigned to them. The scoring panel displays the correct set of applicants automatically based on this scoped process.
+  </Step>
+
+  <Step title="Enter scores per applicant (PuntajeController)">
+    Scores are entered per applicant through the admin scoring panel. `PuntajeController@getPunajesMaximos` is used to validate entries against the theoretical maximum for each area. The scoring interface also provides payment reconciliation through:
+
+    - `POST /get-pagos-dni/{dni}` — retrieve confirmed payments for a given applicant
+    - `POST /insertar-pago` — manually insert a cash-payment record into `pagos_general`
+    - `DELETE /eliminar-pago/{dni}/{operacion}` — remove a mistakenly recorded payment
+
+    ```php
+    // PuntajeController@insertarPago
+    DB::table('pagos_general')->insert([
+        'dni'      => $req['dni'],
+        'operacion'=> $req['operacion'],
+        'fecha'    => $req['fecha'],
+        'monto'    => $req['monto'],
+        'medio'    => 'Caja',
+        'proceso'  => auth()->user()->id_proceso,
+    ]);
+    ```
+
+    The `proceso` column is automatically scoped to the Calificador's current process, preventing cross-process data leaks.
+  </Step>
+
+  <Step title="View and verify vocational exam details (DetalleExamenVocacionalController)">
+    Alongside the main exam score, each applicant completes a vocational orientation test. Calificadores can view and record these results through two endpoints managed by `DetalleExamenVocacionalController`:
+
+    ```
+    POST /save-respuesta   → saveRespuesta  — saves a single vocational exam answer
+    POST /save-vocacional  → saveVocacional — saves the full vocational profile record
+    ```
+
+    Both methods write to the `detalle_examen_vocacional` table, linking the applicant's response to the vocational exam item. The resulting `puntaje_vocacional` is then combined with the area score to produce the final ranking value.
+
+    The scoring panel also provides a dedicated calificación sub-view at `GET /simulacro/calificacion` (rendered as `Simulacro/Ficha`) where vocational answer sheets can be reviewed side-by-side with the applicant's main exam.
+  </Step>
+
+  <Step title="Scores flow into final results (ResultadosController)">
+    Once all scores are entered and verified, the `ResultadosController` handles the final result publication pipeline through a set of bulk-operation endpoints:
+
+    | Endpoint | Method | Description |
+    |---|---|---|
+    | `POST /simulacros/subir-excel-simulacro` | `SubirResultado` | Bulk-import scores from XLSX |
+    | `POST /simulacros/carga-ide/{proceso}/{area}` | `cargaArchivoIde` | Load IDE identification data |
+    | `POST /simulacros/carga-res/{proceso}` | `cargaArchivoRes` | Load response answer data |
+    | `POST /simulacros/carga-pat/{proceso}` | `cargaArchivoPat` | Load answer pattern/key |
+    | `POST /simulacros/get-puntaje-simulacro` | `getResultados` | Retrieve computed scores |
+    | `GET /simulacros/get-select-puestos/{id_proceso}` | `selectPuestos` | Fetch ranked position list |
+
+    The `leerIde/{area}` endpoint (`GET /simulacros/leer-ide/{area}`) reads and validates the uploaded identification file for a given area before scores are committed, acting as a pre-publication check. Once validation passes, the Calificador can trigger publication and results become visible to applicants.
+  </Step>
+</Steps>
+
+---
+
+## Score Download and Reporting
+
+Calificadores can export results in area-segmented Excel files for archival and audit purposes:
+
+| Endpoint | Description |
+|---|---|
+| `GET /simulacros/descargar-excel` | Full results XLSX download |
+| `GET /simulacros/descargar-ingenierias` | Engineering area exam data |
+| `GET /simulacros/descargar-biomedicas` | Biomedical area exam data |
+| `GET /simulacros/descargar-sociales` | Social sciences area exam data |
+
+These methods on `ResultadosController` generate downloadable Excel files and are accessible only to authenticated Calificador users.
+
+---
+
+## How Scores Appear in Final Results
+
+After the Calificador completes entry, scores stored in `puntajes` are joined with applicant data in `ResultadosController@getResultados`. The public-facing score lookup (`GET /api/v1/resultados_simulacro/{dni}` → `ResCepreController@obtenerInformacionEstudiante`) reads this finalized data and returns it without authentication, making it directly available to applicants and integrating university portals.
+
+The maximum-score leaders per area (`PuntajeController@getPunajesMaximos`) are also published on the results announcement view, showing the top score in each knowledge area alongside the name and program of the top-scoring applicant.

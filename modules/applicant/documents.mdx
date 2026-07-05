@@ -1,0 +1,182 @@
+---
+title: "Document Submission and Status Tracking for Applicants"
+sidebarTitle: "Documents"
+description: "Applicants upload required documents per admission process, track review status, receive FCM push notifications on approval or rejection, and download confirmation receipts."
+---
+
+After completing the five-step personal data registration, applicants proceed to the document submission phase. The `PostulanteDocumentoController` manages all upload, retrieval, update, deletion, and review-request operations. Every document belongs to a **tipo_documento** (document type) that is grouped into **RequisitoDocumento** records — each requirement specifies whether it is mandatory (`obligatorio`) for all modalities, mandatory only for specific academic programs, or optional. Applicants need to upload **at least one** of the accepted document types for each requirement to mark that requirement as complete.
+
+## How Requirements Are Determined
+
+Requirements are configured by administrators via the `RequisitoDocumento` model. Each requirement carries:
+
+- **Modalities** (`modalidades`): which admission modalities it applies to.
+- **Programs** (`programas`): if set, the document is mandatory only for those specific programs.
+- **Document types** (`tiposDocumento`): one or more accepted formats for fulfilling the requirement — the applicant uploads any **one** of them.
+
+When the applicant loads `GET /postulante/mis-requisitos`, the controller resolves their active `Inscripcion` to determine `id_programa_postulante` and applies the program-based obligatory logic. The response groups requirements by status (complete / pending) and includes a per-modality progress percentage.
+
+```json
+// GET /postulante/mis-requisitos — example response shape
+{
+  "success": true,
+  "datos": {
+    "total_requisitos": 8,
+    "completados": 3,
+    "tiene_revision_activa": false,
+    "requisitos": [
+      {
+        "id": 1,
+        "nombre": "Documento Nacional de Identidad",
+        "obligatorio": true,
+        "obligatorio_para_postulante": true,
+        "documento_subido": true,
+        "porcentaje": 100,
+        "verificado": false,
+        "tipos_documento": [...]
+      }
+    ],
+    "modalidades": [...]
+  }
+}
+```
+
+## File Upload Constraints
+
+All document uploads are sent as `multipart/form-data` to `POST /postulante/subir-documento`. The `DocumentoStorageService` handles physical file storage and metadata persistence.
+
+| Constraint | Value |
+|---|---|
+| Accepted formats (upload) | PDF only (`mimes:pdf`) |
+| Accepted formats (update) | PDF, JPG, JPEG, PNG |
+| Maximum file size | 20 MB |
+| Maximum documents per requirement | 10 (across all accepted types) |
+
+```javascript
+// Upload a document via axios
+const uploadDocument = async (idTipoDocumento, file) => {
+  const formData = new FormData();
+  formData.append('id_tipo_documento', idTipoDocumento);
+  formData.append('archivo', file);
+
+  const res = await axios.post('/postulante/subir-documento', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  // res.data.datos contains the saved documento record
+  return res.data;
+};
+```
+
+To replace an existing document, send a `POST /postulante/actualizar-documento/{id}` with the new file. Deletion is handled by `DELETE /postulante/eliminar-documento/{id}` or `DELETE /postulante/eliminar-documento-tipo/{idTipoDocumento}` for type-level removal.
+
+## Document Review States
+
+Each uploaded document (`Documento`) passes through several states tracked by the following fields:
+
+<CardGroup cols={3}>
+  <Card title="Pending" icon="clock">
+    Document has been uploaded but not yet reviewed. `apto_revision` and `valido` are both `null` or `false`. The document is visible to reviewers but no action has been taken.
+  </Card>
+  <Card title="Approved" icon="circle-check">
+    A reviewer has set `valido = true` and stamped `validado_at`. The requirement is marked as verified in the applicant's dashboard.
+  </Card>
+  <Card title="Rejected" icon="circle-xmark">
+    A reviewer has set `valido = false` and recorded an `observacion_revisor` explaining the reason. The applicant can replace the file (if no active review request is pending) and resubmit.
+  </Card>
+</CardGroup>
+
+The full document status object returned by `GET /postulante/mis-requisitos` for each document:
+
+```json
+{
+  "id": 42,
+  "nombre": "DNI_frente.pdf",
+  "url": "/storage/documentos/42/DNI_frente.pdf",
+  "seleccionado": true,
+  "apto_revision": true,
+  "valido": null,
+  "fecha_caducidad": null,
+  "observacion_revisor": null,
+  "revisado_at": null,
+  "validado_at": null,
+  "puede_editar": true
+}
+```
+
+Documents with a `fecha_caducidad` in the past are automatically deactivated (`estado = 0`) each time the requirements list is loaded.
+
+## Requesting a Document Review
+
+Once at least one document has been uploaded and the applicant has completed all five registration steps (`avance ≥ 5`), they can submit a review request for a specific modality:
+
+```javascript
+// Request review for a modality
+const requestReview = async (idModalidad) => {
+  const res = await axios.post('/postulante/solicitar-revision', {
+    id_modalidad: idModalidad,
+  });
+  return res.data;
+};
+```
+
+The controller enforces a **24-hour cooldown per modality**: if a non-completed `RevisionSolicitud` exists for the same `(id_postulante, id_modalidad)` pair and was submitted fewer than 24 hours ago, the request is rejected with the earliest retry time. After 24 hours, the existing solicitud is reopened (`estado = 'solicitada'`, incrementing `veces`) rather than creating a duplicate.
+
+The review state can be polled at any time:
+
+```javascript
+// GET /postulante/estado-revision?id_modalidad=3
+const { datos } = (await axios.get('/postulante/estado-revision', {
+  params: { id_modalidad: 3 },
+})).data;
+// datos.revision_solicitada, datos.puede_insistir, datos.proxima_insistencia
+```
+
+## Firebase Cloud Messaging (FCM) Notifications
+
+The system uses **Firebase Cloud Messaging** to deliver real-time push notifications to applicants and reviewers. Applicants register their browser or device FCM token immediately after authentication:
+
+```javascript
+// Register FCM token for the authenticated applicant
+await axios.post('/postulante/fcm-token', {
+  token: fcmToken,          // string token from Firebase SDK
+  device_type: 'web',       // 'web' | 'android' | 'ios'
+});
+```
+
+To remove a token (e.g., on logout):
+
+```javascript
+await axios.delete('/postulante/fcm-token', {
+  data: { token: fcmToken },
+});
+```
+
+When an applicant submits a review request, the `FirebaseService` sends a push notification **to the applicant** confirming the submission, and another push **to all reviewers** (via individual FCM tokens and the `revisores` topic) alerting them to a pending review. The payload includes the applicant's DNI, name, and a direct link to their reviewer profile page.
+
+| Event | Recipient | Push title |
+|---|---|---|
+| Review requested | Applicant | _"Solicitud de revisión enviada"_ |
+| Review requested | Reviewers | _"Solicitud de revisión de documentos"_ |
+| Document approved/rejected | Applicant | Via `SolicitudRevisionNotification` (DB + FCM) |
+
+## Downloading Your Documents
+
+Applicants can download or preview any of their uploaded documents:
+
+```javascript
+// Preview in-browser (PDF viewer)
+window.open(`/postulante/preview-documento/${docId}`, '_blank');
+
+// Force-download the file
+window.location.href = `/postulante/descargar-documento/${docId}`;
+```
+
+Both endpoints enforce ownership — the controller verifies that `documento.id_postulante === postulante.id` before serving the file, returning HTTP 403 otherwise.
+
+## Tracking Progress in the Dashboard
+
+The applicant dashboard (`GET /postulante/dashboard`) reflects document submission status through the `revisionSolicitada` flag. Once `tiene_revision_activa = true`, step 2 of the five-step timeline is marked as **done** and the overall `progressPercent` advances. Applicants can also view the full step-by-step audit trail at `GET /postulante/seguimiento-data`, which returns all `Paso` records with timestamps and the state of the most recent `RevisionSolicitud`.
+
+<Warning>
+  Upload clear, high-contrast scans or photos of your documents. Blurry, cropped, or low-resolution files are the most common reason for document rejection by reviewers. Rejected documents require you to re-upload and wait for the next review cycle, which may delay your admission process. Ensure all text and photographs on official documents are fully legible before uploading.
+</Warning>

@@ -1,0 +1,147 @@
+---
+title: "Segundas Especialidades: Second-Specialty Admissions Overview"
+sidebarTitle: "Overview"
+description: "The Segundas Especialidades module manages a dedicated admission process for second-specialty programs with its own pre-registration, document flow, vacancies, and results."
+---
+
+Segundas Especialidades is a fully independent admission track within the Sistema de Admisión Web designed for professional graduates who wish to enroll in a second-specialty postgraduate program. Unlike the main undergraduate admission process, this track targets applicants who already hold a university degree and are seeking an additional specialization. It carries its own pre-registration flow, its own vacancy tables, its own result publication pipeline, and a dedicated administrative panel — none of which overlap with the main admission module.
+
+<Note>
+The cultural identity service (`IdentidadSegundaController`) was added in February 2026 to comply with updated SUNEDU reporting requirements. It connects to an external microservice at `https://test-admision.unap.edu.pe/service_identidad/api/v1/` to retrieve condiciones de lengua, pertenencia cultural, lenguas indígenas, pueblos indígenas, and stored identidad cultural records per applicant.
+</Note>
+
+## Role and Access
+
+The **Segundas** role (`id_rol = 3`) is required to access the administrative panel. After login, users are redirected to `/segundas`. All routes under the `/segundas/*` prefix require both `auth` and `segundas` middleware. The index route (`GET /segundas`) renders `Segundas/Admin/Preinscripciones/index` directly and acts as the default landing page after authentication.
+
+```
+Middleware file: app/Http/Middleware/Segundas.php
+Route prefix:    /segundas
+Auth redirect:   /segundas  (after login with id_rol = 3)
+```
+
+---
+
+## Comparison with the Main Admission Process
+
+| Aspect | Main Admission | Segundas Especialidades |
+|---|---|---|
+| Target applicants | Secondary school graduates | University graduates / professionals |
+| Academic level | Undergraduate (`nivel_academico` general) | `Segunda Especialidad` |
+| Vacancy table | `vacantes` (main process) | `vacantes` filtered by `nivel_academico = 'Segunda Especialidad'` |
+| Results table | `resultados` | `resultados_segundas` |
+| Pre-registration | `pre_inscripcion` (main) | `pre_inscripcion` filtered by `id_proceso` scoped to segundas admin |
+| Identity data | Not collected separately | External `service_identidad` microservice |
+| Score range | Multi-area (INGENIERÍAS, BIOMÉDICAS, SOCIALES) | Per-program score 0–20 with `apto` flag |
+| Route namespace | `/admin/*` | `/segundas/*` |
+
+Both tracks share the `postulante`, `pre_inscripcion`, `programa`, and `modalidad` tables, but every query in the Segundas module is scoped to the administrator's `id_proceso`, preventing data from mixing between tracks.
+
+---
+
+## Module Capabilities
+
+### Preinscripciones
+
+Administrators manage the incoming pre-registration queue at `GET /segundas/preinscripciones` (`Segundas/Admin/Preinscripciones/index`). Operations available:
+
+- `POST /segundas/get-preinscripciones-segundas` — paginated list with applicant name, DNI, program, modality, process, date, sex, inscription status, and observations (`PreinscripcionSegundasController@getPreinscripciones`)
+- `POST /segundas/actualizar-preinscripciones-segundas` — update a pre-registration's program or modality, appending change notes to the `observacion` log
+- `POST /segundas/guardar-inscripcion-segundas` — promote a pre-registration to a confirmed `inscripciones` record
+- `DELETE /segundas/delete-preinscripcion-segundas/{id}` — remove an incorrect or duplicate pre-registration
+
+### Postulante Management
+
+Applicant profiles for the segundas track are managed at `GET /segundas/postulantes` (`Segundas/Admin/Postulantes/index`):
+
+- `POST /segundas/get-postulantes-segundas` — retrieve applicants (`PostulanteSegundaController@getPostulantes`)
+- `GET /segundas/postulante-perfil/{dni}` — full applicant profile view (`PostulanteSegundaController@showPostulante`)
+- `GET /segundas/get-postulante-datos/{dni}` — raw applicant JSON for AJAX consumption
+- `POST /segundas/save-postulante-admin` — create or update an applicant record from the admin panel
+- `POST /save-postulante-adicional` — save SUNEDU-required additional data (disability, linguistic identity, cultural belonging) via `PostulanteSegundaController@saveDataAdicional`
+
+### Vacancy Management
+
+Second-specialty vacancies are managed per program at `GET /segundas/vacantes` (`Segundas/Admin/Vacantes/index`). The vacancy table is filtered to `nivel_academico = 'Segunda Especialidad'` and joined with the `programa` and `vacantes` tables. Available operations:
+
+- `POST /segundas/get-vacantes-segundas-admin` — list programs with their current vacancy counts and SUNEDU codes
+- `POST /segundas/save-numero-vacantes-segundas` — create a new vacancy record for a program
+- `POST /segundas/actualizar-vacantes-segundas` — update vacancy count
+- `POST /segundas/delete-vacante-segundas` — remove a vacancy record
+
+### Modality Management
+
+Active modalities for segundas programs are retrieved with:
+
+```
+GET /segundas/get-modalidades-segundas-activas
+→ ModalidadSegundaController@getModalidadesActivas
+```
+
+This endpoint is consumed by the pre-registration and admin forms to populate modality selectors.
+
+### Observados (Flagged Applicants)
+
+Applicants who fail document checks or have administrative flags are managed at `GET /segundas/observados` (`Segundas/Admin/Observados/index`):
+
+- `POST /segundas/get-observados-segundas` — paginated list of flagged applicants
+- `POST /segundas/save-observado-segundas` — create or update an observado record
+
+### Identity Verification (Identidad Cultural)
+
+The `IdentidadSegundaController` connects to the external identity microservice at `https://test-admision.unap.edu.pe/service_identidad/api/v1/` to provide four data endpoints (all public, no `segundas` middleware):
+
+| Endpoint | Method | Returns |
+|---|---|---|
+| `GET /get-condiciones-lengua-segundas` | `getCondicionesLengua` | Language condition options |
+| `GET /get-pertenencia-cultural-segundas` | `getPertenenciaCultural` | Cultural belonging options |
+| `GET /get-lengua-segundas` | `getLenguaIndigena` | Indigenous language options |
+| `GET /get-pueblos-indigenes-segundas` | `getPueblosIndigenas` | Indigenous peoples options |
+| `GET /get-identidad-cultural/{id_postulante}/{id_proceso}` | `getIdentidadCulturalByPostulanteProceso` | Stored identity data for one applicant |
+
+The `getIdentidadCulturalByPostulanteProceso` method merges the external microservice response with locally-stored disability data (`discapacidad`, `tipo_discapacidad`, `tipo_discapacidad_otro`) from the `postulante` model, returning a unified identity profile.
+
+### Summaries and Results
+
+**Summary reports** are available through `ResumenesSegundaController`:
+
+- `POST /segundas/get-resumen-preinscripcion-segundas` — aggregated pre-registration summary
+- `POST /segundas/get-detalle-preinscripcion-segundas` — detailed pre-registration list
+
+**Results management** is handled by `ResultadosSegundaController` at `GET /segundas/puntajes` (`Segundas/Admin/Puntajes/index`):
+
+- `POST /segundas/get-resultados-segundas` — list applicants with their scores, positions, and `apto` status
+- `POST /segundas/guardar-puntaje` — enter or update a score (0–20 range, validated; blocked if the program's vacantes record has `publicado = 1`)
+- `GET /segundas/get-select-programas-asignados` — programs assigned to the current admin user
+- `POST /segundas/get-vacante-programa-segundas` — vacancy/program detail for a specific program
+- `POST /segundas/publicar-resultados-segundas` — publish results (fires `PublicarResultadosJob` queue job)
+- `POST /segundas/pdf-resultados-segundas` — generate PDF of results
+
+A PDF pre-registration voucher is generated on demand for applicants:
+
+```
+GET /pdf-preinscripcion/{id_proceso}/{dni}
+→ PreinscripcionSegundasController@pdfPreinscripcion
+```
+
+---
+
+## Queue Job: Publishing Results
+
+Result publication is handled asynchronously via a queued job (`PublicarResultadosJob`). If a job fails, administrators can inspect and retry failed jobs using the maintenance endpoints (accessible to Segundas role):
+
+```
+GET /segundas/queue/retry-publicar  — retry all failed PublicarResultadosJob entries
+GET /segundas/queue/failed-publicar — list failed jobs with error summaries
+GET /segundas/queue/failed/{id}     — full exception detail for a specific failed job
+```
+
+---
+
+## Further Reading
+
+<CardGroup cols={2}>
+  <Card title="Pre-Registration Process" icon="file-pen" href="/modules/segundas/preinscripcion">
+    Multi-step public registration wizard for second-specialty applicants — identity validation, personal data, SUNEDU fields, program selection, and document upload.
+  </Card>
+</CardGroup>

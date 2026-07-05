@@ -1,0 +1,456 @@
+---
+title: "REST API Endpoints for Applicant Data Lookup"
+sidebarTitle: "Applicants"
+description: "Query admitted students, enrolled applicants, scores, simulacro results, and CEPRE enrollment status using DNI, year, and process identifiers."
+---
+
+The applicant endpoints let you retrieve detailed information about university admission candidates — from full admitted-student records linked to biometric codes, to lightweight score lookups and CEPRE enrollment checks. Most lookup endpoints accept a national ID number (DNI) as a path parameter.
+
+---
+
+## GET /api/get-ingresante/{dni}/{anio}/{ciclo}
+
+Returns the full admitted student record for a given DNI, year, and admission cycle. This endpoint joins across `postulante`, `inscripciones`, `resultados`, `programa`, `facultad`, `procesos`, `filial`, `tipo_proceso`, `paises`, and `control_biometrico` to produce a comprehensive snapshot of the admitted student.
+
+**Authentication:** Sanctum Bearer token required.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's national identity document number (8 digits for DNI).
+</ParamField>
+
+<ParamField path="anio" type="integer" required>
+  The admission year (e.g., `2024`).
+</ParamField>
+
+<ParamField path="ciclo" type="integer" required>
+  The admission cycle number within the year (e.g., `1` for the first cycle, `2` for the second).
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-ingresante/12345678/2024/1 \
+  -H "Authorization: Bearer {token}"
+```
+
+### Response — HTTP 200 (found)
+
+```json
+{
+  "status": true,
+  "mensaje": "-",
+  "data": {
+    "nombres": "JUAN",
+    "primer_apellido": "QUISPE",
+    "segundo_apellido": "MAMANI",
+    "tipo_documento": "DNI",
+    "nro_documento": "12345678",
+    "sexo": "M",
+    "estado_civil": "S",
+    "celular": "987654321",
+    "fecha_nacimiento": "2000-05-15",
+    "email": "juan@ejemplo.com",
+    "ubigeo_residencia": "210101",
+    "ubigeo_nacimiento": "210101",
+    "direccion": "AV. UNIVERSITARIA 123",
+    "discapacidad": null,
+    "pais_nacimiento": "PE",
+    "nacionalidad": "PERUANA",
+    "codigo_ingreso": "240110001",
+    "codigo_sede_filial": "JULIACA",
+    "tipo_proceso": 1,
+    "proceso_admision": "2024-1",
+    "codigo_facultad": "FAC-ING",
+    "codigo_programa": "080301"
+  }
+}
+```
+
+### Response — HTTP 203 (not found)
+
+```json
+{
+  "status": false,
+  "mensaje": "Ingresante no encontrado"
+}
+```
+
+---
+
+## GET /api/get-postulante-pago/{dni}/{proceso}
+
+Returns a base applicant record for payment verification purposes, keyed by DNI and process ID.
+
+**Authentication:** Sanctum Bearer token required.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+<ParamField path="proceso" type="integer" required>
+  The internal admission process ID.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-postulante-pago/12345678/9 \
+  -H "Authorization: Bearer {token}"
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "nro_doc": "12345678",
+  "primer_apellido": "QUISPE",
+  "segundo_apellido": "MAMANI",
+  "nombres": "JUAN",
+  "id_gestion": "",
+  "id_programa": "",
+  "pagos": null
+}
+```
+
+---
+
+## GET /api/v1/get-postulante-inscrito/{dni}
+
+Returns the list of admission processes that a given applicant is currently enrolled in. The response groups all enrolled processes as a JSON array under `user_info.procesos`.
+
+**Authentication:** Sanctum Bearer token required.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/v1/get-postulante-inscrito/12345678 \
+  -H "Authorization: Bearer {token}"
+```
+
+### Response — HTTP 200 (found)
+
+```json
+{
+  "estado": true,
+  "user_info": {
+    "dni": "12345678",
+    "nombres": "JUAN",
+    "paterno": "QUISPE",
+    "materno": "MAMANI",
+    "procesos": [
+      "ADMISIÓN 2024-I JULIACA",
+      "ADMISIÓN CEPRE 2024-II"
+    ]
+  }
+}
+```
+
+### Response — HTTP 200 (not found)
+
+```json
+{
+  "estado": false,
+  "user_info": null
+}
+```
+
+---
+
+## GET /api/get-puntaje/{dni}
+
+Returns the applicant's score record for the current admission year. Results include the program name, admission modality, total score, vocational score, and apto/no-apto condition.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/get-puntaje/12345678
+```
+
+### Response Fields
+
+<ResponseField name="datos" type="array">
+  Array of score records for the applicant.
+
+  <ResponseField name="fecha" type="string">
+    Date the score was recorded.
+  </ResponseField>
+  <ResponseField name="dni" type="string">
+    Applicant DNI.
+  </ResponseField>
+  <ResponseField name="nombres" type="string">
+    Applicant first names.
+  </ResponseField>
+  <ResponseField name="primer_apellido" type="string">
+    Applicant paternal surname.
+  </ResponseField>
+  <ResponseField name="segundo_apellido" type="string">
+    Applicant maternal surname.
+  </ResponseField>
+  <ResponseField name="modalidad" type="string">
+    Admission modality code.
+  </ResponseField>
+  <ResponseField name="puntaje" type="number">
+    Total score.
+  </ResponseField>
+  <ResponseField name="puntaje_vocacional" type="number">
+    Vocational aptitude score.
+  </ResponseField>
+  <ResponseField name="condicion" type="string">
+    Admission condition — `SI` (qualified) or `NO`.
+  </ResponseField>
+  <ResponseField name="programa" type="string">
+    Name of the academic programme.
+  </ResponseField>
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "datos": [
+    {
+      "fecha": "2024-03-15",
+      "dni": "12345678",
+      "nombres": "JUAN",
+      "primer_apellido": "QUISPE",
+      "segundo_apellido": "MAMANI",
+      "modalidad": "ORD",
+      "puntaje": 68.5,
+      "puntaje_vocacional": 14,
+      "condicion": "SI",
+      "programa": "INGENIERÍA DE SISTEMAS"
+    }
+  ]
+}
+```
+
+---
+
+## GET /api/v1/resultados_simulacro/{dni}
+
+Returns the simulacro (mock exam) results for an applicant from the `resultados_sim` table.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/v1/resultados_simulacro/12345678
+```
+
+### Response Fields
+
+<ResponseField name="id" type="integer">
+  Internal record ID.
+</ResponseField>
+<ResponseField name="dni" type="string">
+  Applicant DNI.
+</ResponseField>
+<ResponseField name="nombres" type="string">
+  Applicant full names.
+</ResponseField>
+<ResponseField name="puntaje" type="number">
+  Simulacro score.
+</ResponseField>
+<ResponseField name="programa" type="string">
+  Programme the applicant applied to.
+</ResponseField>
+<ResponseField name="fecha" type="string">
+  Date of the simulacro exam.
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "id": 201,
+  "dni": "12345678",
+  "nombres": "JUAN QUISPE MAMANI",
+  "puntaje": 55.75,
+  "programa": "ENFERMERÍA",
+  "fecha": "2024-02-10",
+  "created_at": "2024-02-11T08:00:00.000000Z",
+  "updated_at": "2024-02-11T08:00:00.000000Z"
+}
+```
+
+---
+
+## GET /api/verificar-ingreso/{periodo}/{dni}
+
+Checks whether an applicant has been admitted (ingresante) in a given period. The period is a concatenated string of `anio` + `ciclo_oti` (e.g., `"202401"`). The endpoint also accepts a `codigo_ingreso` in place of a DNI.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="periodo" type="string" required>
+  Admission period string formed by concatenating year and zero-padded cycle, e.g., `202401` for 2024 cycle 1.
+</ParamField>
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI or their `codigo_ingreso`.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/verificar-ingreso/202401/12345678
+```
+
+### Response Fields
+
+<ResponseField name="estado" type="boolean">
+  Always `true` — indicates the query executed successfully.
+</ResponseField>
+<ResponseField name="ingreso" type="boolean">
+  `true` if the applicant was admitted in the specified period; `false` otherwise.
+</ResponseField>
+<ResponseField name="codigo" type="string | null">
+  The admission code (`codigo_ingreso`) when the applicant is found; `null` otherwise.
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "estado": true,
+  "ingreso": true,
+  "codigo": "240110001"
+}
+```
+
+---
+
+## GET /api/biometrico/seguimiento/{periodo}/{dni}
+
+Returns full biometric tracking data for an admitted applicant in a given period, including programme, modality, and contact details.
+
+**Authentication:** None.
+
+### Path Parameters
+
+<ParamField path="periodo" type="string" required>
+  Period string in `YYYY-C` format, e.g., `2024-1`.
+</ParamField>
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/biometrico/seguimiento/2024-1/12345678
+```
+
+### Response — HTTP 200
+
+```json
+{
+  "estado": true,
+  "datos": [
+    {
+      "codigo": "240110001",
+      "nro_doc": "12345678",
+      "nombres": "JUAN",
+      "paterno": "QUISPE",
+      "materno": "MAMANI",
+      "celular": "987654321",
+      "email": "juan@ejemplo.com",
+      "programa": "INGENIERÍA DE SISTEMAS",
+      "modalidad": "ORDINARIO",
+      "procesos": "ADMISIÓN 2024-I JULIACA",
+      "Periodo": "2024-1"
+    }
+  ]
+}
+```
+
+---
+
+## POST /api/v1/postulante-cepre-inscrito
+
+Checks whether a given DNI is enrolled in CEPRE (Centro Pre-Universitario). This endpoint is public but **rate-limited to 50 requests per minute**.
+
+**Authentication:** None (throttle: `50 req/min`).
+
+### Request Body
+
+<ParamField body="dni" type="string" required>
+  The applicant's DNI to check for CEPRE enrollment.
+</ParamField>
+
+### Example Request
+
+```bash
+curl -X POST https://your-domain.com/api/v1/postulante-cepre-inscrito \
+  -H "Content-Type: application/json" \
+  -d '{"dni": "12345678"}'
+```
+
+<Note>
+  Exceeding 50 requests per minute from the same IP will return HTTP `429 Too Many Requests`. Implement back-off logic in integrations that may burst-query this endpoint.
+</Note>
+
+---
+
+## GET /api/v1/observados-cepre/{dni}
+
+Returns CEPRE observation/sanction data for a given DNI. Only active observations (`estado = 1`) are returned. This endpoint is protected by the `cepre` middleware.
+
+**Authentication:** `cepre` middleware.
+
+### Path Parameters
+
+<ParamField path="dni" type="string" required>
+  The applicant's DNI.
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://your-domain.com/api/v1/observados-cepre/12345678 \
+  -H "X-Cepre-Token: your-cepre-key"
+```
+
+### Response — HTTP 200 (observed)
+
+```json
+{
+  "estado": true,
+  "motivo": "INCUMPLIMIENTO DE REGLAMENTO"
+}
+```
+
+### Response — HTTP 404 (not observed)
+
+```json
+{
+  "estado": false
+}
+```
